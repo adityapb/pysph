@@ -13,7 +13,8 @@ import pyopencl.tools  # noqa: 401
 from pysph.base.config import get_config
 from pysph.base.utils import is_overloaded_method
 from pysph.base.ext_module import get_platform_dir
-from pysph.base.opencl import profile, get_context, get_queue, DeviceHelper
+from pysph.base.opencl import (profile_kernel, get_context, get_queue,
+                                DeviceHelper)
 from pysph.base.translator import (CStructHelper, OpenCLConverter,
                                    ocl_detect_type)
 
@@ -27,14 +28,14 @@ def get_kernel_definition(kernel, arg_list):
     sig = '__kernel void\n{kernel}\n({args})'.format(
         kernel=kernel, args=', '.join(arg_list),
     )
-    return '\n'.join(wrap(sig, width=78, subsequent_indent=' '*4,
+    return '\n'.join(wrap(sig, width=78, subsequent_indent=' ' * 4,
                           break_long_words=False))
 
 
-def wrap_code(code, indent=' '*4):
+def wrap_code(code, indent=' ' * 4):
     return wrap(
         code, width=74, initial_indent=indent,
-        subsequent_indent=indent + ' '*4, break_long_words=False
+        subsequent_indent=indent + ' ' * 4, break_long_words=False
     )
 
 
@@ -56,13 +57,13 @@ def get_code(obj, transpiler=None):
 class OpenCLAccelerationEval(object):
     """Does the actual work of performing the evaluation.
     """
+
     def __init__(self, helper):
         self.helper = helper
         self.particle_arrays = helper.object.particle_arrays
         self.nnps = None
         self._queue = helper._queue
         self._use_double = get_config().use_double
-        self._profile = get_config().profile
 
     def _call_kernel(self, info, extra_args):
         nnps = self.nnps
@@ -87,15 +88,11 @@ class OpenCLAccelerationEval(object):
                 cache._start_idx_gpu.array.data,
                 cache._neighbors_gpu.array.data
             ] + extra_args
-            event = call(*args)
-            if self._profile:
-                profile(call.get_info(cl.kernel_info.FUNCTION_NAME),
-                        event)
+            call = profile_kernel(call, call.function_name)
+            call(*args)
         else:
-            event = call(*(args + extra_args))
-            if self._profile:
-                profile(call.get_info(cl.kernel_info.FUNCTION_NAME),
-                        event)
+            call = profile_kernel(call, call.function_name)
+            call(*(args + extra_args))
         self._queue.finish()
 
     def _sync_from_gpu(self, eq):
@@ -419,7 +416,7 @@ class AccelerationEvalOpenCLHelper(object):
         py_args.extend(_args)
         all_args.extend(self._get_typed_args(_args + ['t', 'dt']))
 
-        body = '\n'.join([' '*4 + x for x in code])
+        body = '\n'.join([' ' * 4 + x for x in code])
         self.data.append(dict(
             kernel=kernel, args=py_args, dest=dest, loop=False,
             real=group.real, type='kernel'
@@ -434,8 +431,7 @@ class AccelerationEvalOpenCLHelper(object):
 
     def _declare_precomp_vars(self, context):
         decl = []
-        names = list(context.keys())
-        names.sort()
+        names = sorted(context.keys())
         for var in names:
             value = context[var]
             if isinstance(value, int):
@@ -553,7 +549,7 @@ class AccelerationEvalOpenCLHelper(object):
         py_args.extend(_args)
         all_args.extend(self._get_typed_args(_args))
 
-        body = '\n'.join([' '*4 + x for x in code])
+        body = '\n'.join([' ' * 4 + x for x in code])
         body = self._set_kernel(body, self.object.kernel)
         k_name = self.object.kernel.__class__.__name__
         all_args.extend(
