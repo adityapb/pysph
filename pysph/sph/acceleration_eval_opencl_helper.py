@@ -75,7 +75,9 @@ class OpenCLAccelerationEval(object):
         max_wg_sz = call.get_work_group_info(
             cl.kernel_work_group_info.WORK_GROUP_SIZE, queue.device
         )
-        gs, ls = cl.array.splay(queue, n, max_wg_sz)
+        #gs, ls = cl.array.splay(queue, n, max_wg_sz)
+        gs = (int(32 * np.ceil(n / 32)),)
+        ls = (1,)
         args[1:4] = gs, ls, np.array([n], np.int64)
         args[4:] = [x() for x in args[4:]]
         if info.get('loop'):
@@ -380,11 +382,8 @@ class AccelerationEvalOpenCLHelper(object):
         all_args = ['long n']
         py_args = []
         code = [
-            'int lid = get_local_id(0);',
-            'int gsize = get_global_size(0);',
-            'int work_group_start = get_local_size(0)*get_group_id(0);',
-            'long d_idx;',
-            'for (d_idx = work_group_start + lid; d_idx < n; d_idx += gsize) {'
+            'int d_idx = get_global_id(0);',
+            'if(d_idx >= n) return;'
         ]
         for eq in all_eqs.equations:
             method = getattr(eq, kind, None)
@@ -408,7 +407,7 @@ class AccelerationEvalOpenCLHelper(object):
                         indent=' '*4
                     )
                 )
-        code.append('}')
+        #code.append('}')
         s_ary, d_ary = all_eqs.get_array_names()
         # We only need the dest arrays here as these are simple kernels
         # without a loop so there is no "source".
@@ -497,16 +496,14 @@ class AccelerationEvalOpenCLHelper(object):
         context = eq_group.context
         code = self._declare_precomp_vars(context)
         code += [
-            'int lid = get_local_id(0);',
-            'int gsize = get_global_size(0);',
-            'int work_group_start = get_local_size(0)*get_group_id(0);',
-            'long d_idx, s_idx, i;',
+            'int d_idx = get_global_id(0);',
+            'if(d_idx >= n) return;'
+            'long s_idx, i;',
             'long start, end;',
-            'for (d_idx = work_group_start + lid; d_idx < n; d_idx += gsize) {'
-            '    start = start_idx[d_idx];',
-            '    end = start + nbr_length[d_idx];',
-            '    for (i=start; i<end; i++) {',
-            '        s_idx = neighbors[i];',
+            'start = start_idx[d_idx];',
+            'end = start + nbr_length[d_idx];',
+            'for (i=start; i<end; i++) {',
+            '   s_idx = neighbors[i];',
         ]
         pre = []
         for p, cb in eq_group.precomputed.items():
@@ -541,7 +538,7 @@ class AccelerationEvalOpenCLHelper(object):
                     )
                 )
 
-        code.append(' '*8 + '}')
+        #code.append(' '*8 + '}')
 
         s_ary, d_ary = eq_group.get_array_names()
         s_ary.update(d_ary)
