@@ -76,8 +76,8 @@ class OpenCLAccelerationEval(object):
             cl.kernel_work_group_info.WORK_GROUP_SIZE, queue.device
         )
         #gs, ls = cl.array.splay(queue, n, max_wg_sz)
-        gs = (int(32 * np.ceil(n / 32)),)
-        ls = (1,)
+        gs = (128 * int(np.ceil(n / 128)),)
+        ls = (128,)
         args[1:4] = gs, ls, np.array([n], np.int64)
         args[4:] = [x() for x in args[4:]]
         if info.get('loop'):
@@ -382,7 +382,7 @@ class AccelerationEvalOpenCLHelper(object):
         all_args = ['long n']
         py_args = []
         code = [
-            'int d_idx = get_global_id(0);',
+            'int d_idx = get_global_id(0) * get_local_id(0);',
             'if(d_idx >= n) return;'
         ]
         for eq in all_eqs.equations:
@@ -496,7 +496,7 @@ class AccelerationEvalOpenCLHelper(object):
         context = eq_group.context
         code = self._declare_precomp_vars(context)
         code += [
-            'int d_idx = get_global_id(0);',
+            'int d_idx = get_global_id(0) * get_local_id(0);',
             'if(d_idx >= n) return;'
             'long s_idx, i;',
             'long start, end;',
