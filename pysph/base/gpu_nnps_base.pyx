@@ -76,28 +76,29 @@ cdef class GPUNeighborCache:
     #### Private protocol ################################################
 
     cdef void _find_neighbors(self):
-        self._nnps.find_neighbor_lengths(self._nbr_lengths_gpu.array)
-        # FIXME:
-        # - Store sum kernel
-        # - don't allocate neighbors_gpu each time.
-        # - Don't allocate _nbr_lengths and start_idx.
-        total_size_gpu = cl.array.sum(self._nbr_lengths_gpu.array)
-        cdef unsigned long total_size = <unsigned long>(total_size_gpu.get())
+        cdef unsigned long total_size
+        if not self._cached:
+            self._nnps.find_neighbor_lengths(self._nbr_lengths_gpu.array)
+            total_size_gpu = cl.array.sum(self._nbr_lengths_gpu.array)
+            total_size = <unsigned long>(total_size_gpu.get())
 
-        # Allocate _neighbors_cpu and neighbors_gpu
-        self._neighbors_gpu.resize(total_size)
+            self._neighbors_gpu.resize(total_size)
 
-        self._start_idx_gpu = self._nbr_lengths_gpu.copy()
+            self._start_idx_gpu = self._nbr_lengths_gpu.copy()
 
-        # Do prefix sum on self._neighbor_lengths for the self._start_idx
-        if self._get_start_indices is None:
-            self._get_start_indices = ExclusiveScanKernel(
-                self._nnps.ctx, np.uint32, scan_expr="a+b", neutral="0"
-            )
+            # Do prefix sum on self._neighbor_lengths for the self._start_idx
+            if self._get_start_indices is None:
+                self._get_start_indices = ExclusiveScanKernel(
+                    self._nnps.ctx, np.uint32, scan_expr="a+b", neutral="0"
+                )
 
-        self._get_start_indices(self._start_idx_gpu.array)
+            self._get_start_indices(self._start_idx_gpu.array)
+        q_indices = cl.array.arange(self._queue, 0, n_p, 1, dtype=np.uint32)
+        fail = cl.array.zeros(queue, n_p, np.uint32)
         self._nnps.find_nearest_neighbors_gpu(self._neighbors_gpu.array,
-                self._start_idx_gpu.array)
+                self._start_idx_gpu.array, q_indices, fail,
+                self._nbr_lengths_gpu.array)
+        failed_indices = q_indices[fail == 1]
         self._cached = True
 
     cdef void copy_to_cpu(self):

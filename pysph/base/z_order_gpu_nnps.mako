@@ -148,19 +148,11 @@
     {
         key = nbr_boxes[j];
         idx = find_idx(keys_src, num_particles_src, key);
-        overflow_cid_to_idx[27*start_idx + j] = idx;
+        overflow_cid_to_idx[27 * start_idx + j] = idx;
     }
 </%def>
 
-<%def name="z_order_nbrs_prep(data_t, sorted, dst_src)", cached="False">
-     unsigned int qid;
-
-    % if sorted:
-        qid = i;
-    % else:
-        qid = pids_dst[i];
-    % endif
-
+<%def name="z_order_nbrs_prep(data_t, dst_src)", cached="False">
     ${data_t}4 q = (${data_t}4)(d_x[qid], d_y[qid], d_z[qid], d_h[qid]);
 
     int3 c;
@@ -175,7 +167,7 @@
     int idx;
     unsigned int j;
     ${data_t} dist;
-    ${data_t} h_i = radius_scale2*q.w*q.w;
+    ${data_t} h_i = radius_scale2 * q.w * q.w;
     ${data_t} h_j;
 
     unsigned long key;
@@ -213,7 +205,15 @@
 </%def>
 
 <%def name="z_order_nbr_lengths_src(data_t, sorted, dst_src)" cached="False">
-    ${z_order_nbrs_prep(data_t, sorted, dst_src)}
+     unsigned int qid;
+
+    % if sorted:
+        qid = i;
+    % else:
+        qid = pids_dst[i];
+    % endif
+
+    ${z_order_nbrs_prep(data_t, dst_src)}
 
     #pragma unroll
     for(j=0; j<27; j++)
@@ -239,18 +239,23 @@
 
 
 <%def name="z_order_nbrs_args(data_t)" cached="False">
-    ${data_t}* d_x, ${data_t}* d_y, ${data_t}* d_z,
+    unsigned int* q_indices, ${data_t}* d_x, ${data_t}* d_y, ${data_t}* d_z,
     ${data_t}* d_h, ${data_t}* s_x, ${data_t}* s_y,
     ${data_t}* s_z, ${data_t}* s_h,
     ${data_t}3 min, unsigned int num_particles, unsigned long* keys,
     unsigned int* pids_dst, unsigned int* pids_src, unsigned int max_cid_src,
     unsigned int* cids, int* cid_to_idx, int* overflow_cid_to_idx,
     unsigned int* dst_to_src, unsigned int* start_indices, unsigned int* nbrs,
-    ${data_t} radius_scale2, ${data_t} cell_size
+    ${data_t} radius_scale2, ${data_t} cell_size, unsigned int* nbr_lengths,
+    unsigned int* fail
 </%def>
 
 <%def name="z_order_nbrs_src(data_t, sorted, dst_src)" cached="False">
-    ${z_order_nbrs_prep(data_t, sorted, dst_src)}
+    unsigned int qid = q_indices[i];
+    unsigned int alloc = nbr_lengths[qid];
+    nbr_lengths[qid] = 0;
+
+    ${z_order_nbrs_prep(data_t, dst_src)}
 
     unsigned long start_idx = (unsigned long) start_indices[qid];
     unsigned long curr_idx = 0;
@@ -271,11 +276,18 @@
                     q.z - s_z[pid]);
             if(dist < h_i || dist < h_j)
             {
+                if(curr_idx >= alloc)
+                {
+                    fail[qid] = 1;
+                    curr_idx++;
+                    continue;
+                }
                 nbrs[start_idx + curr_idx] = pid;
                 curr_idx++;
             }
             idx++;
         }
+        nbr_lengths[qid] = curr_idx;
     }
 
 </%def>

@@ -38,4 +38,5 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
 
     cdef void find_neighbor_lengths(self, nbr_lengths)
 
-    cdef void find_nearest_neighbors_gpu(self, nbrs, start_indices)
+    cdef void find_nearest_neighbors_gpu(self, nbrs, start_indices, q_indices,
+            fail, nbr_lengths)

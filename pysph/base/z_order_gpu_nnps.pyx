@@ -222,14 +222,15 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                 self.overflow_cid_to_idx.array, self.dst_to_src.array,
                 nbr_lengths, self.radius_scale2, self.cell_size)
 
-    cdef void find_nearest_neighbors_gpu(self, nbrs, start_indices):
+    cdef void find_nearest_neighbors_gpu(self, nbrs, start_indices, q_indices,
+            fail, nbr_lengths):
         z_order_nbrs = self.helper.get_kernel(
                 "z_order_nbrs", sorted=self._sorted,
                 dst_src=self.dst_src)
 
         dst_gpu = self.dst.pa.gpu
         src_gpu = self.src.pa.gpu
-        z_order_nbrs(dst_gpu.x, dst_gpu.y, dst_gpu.z,
+        z_order_nbrs(q_indices, dst_gpu.x, dst_gpu.y, dst_gpu.z,
                 dst_gpu.h, src_gpu.x, src_gpu.y, src_gpu.z, src_gpu.h,
                 self.make_vec(self.xmin[0], self.xmin[1],
                     self.xmin[2]),
@@ -240,5 +241,6 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                 self.max_cid[self.src_index], self.cids[self.dst_index].array,
                 self.cid_to_idx[self.src_index].array,
                 self.overflow_cid_to_idx.array, self.dst_to_src.array,
-                start_indices, nbrs, self.radius_scale2, self.cell_size)
+                start_indices, nbrs, self.radius_scale2, self.cell_size,
+                nbr_lengths, fail)
 
