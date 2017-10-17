@@ -9,6 +9,7 @@ class Config(object):
     def __init__(self):
         self._use_openmp = None
         self._use_opencl = None
+        self._use_cuda = None
         self._use_double = None
         self._profile = None
 
@@ -37,6 +38,20 @@ class Config(object):
 
     def _use_opencl_default(self):
         return False
+
+    @property
+    def use_cuda(self):
+        if self._use_cuda is None:
+            self._use_cuda = self._use_cuda_default()
+        return self._use_cuda
+
+    @use_cuda.setter
+    def use_cuda(self, value):
+        self._use_cuda = value
+
+    def _use_cuda_default(self):
+        return False
+
 
     @property
     def use_double(self):
