@@ -52,7 +52,7 @@ class GPUNNPSHelper(object):
             prg = cl.Program(self.ctx, src).build()
             def call(*args):
                 knl = getattr(prg, kernel_name)
-                event = knl(self.queue, args[1].size, None, *args)
+                event = knl(self.queue, (args[0].size,), None, *args)
                 return event
             self.cache[data] = call
             return profile_kernel(call, kernel_name)
