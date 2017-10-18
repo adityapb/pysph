@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
+import pyopencl as cl
 from pyopencl.elementwise import ElementwiseKernel
 from mako.template import Template
 import os
 
-from pysph.base.opencl import profile_kernel
+from pysph.base.opencl import get_queue, profile_kernel
 
 
 class GPUNNPSHelper(object):
@@ -33,26 +34,25 @@ class GPUNNPSHelper(object):
         )
         self.preamble = "\n".join([helper_preamble, preamble])
         self.ctx = ctx
+        self.queue = get_queue()
         self.cache = {}
 
     def _get_code(self, kernel_name, **kwargs):
-        arguments = self.src_tpl.get_def("%s_args" % kernel_name).render(
+        knl = self.src_tpl.get_def(kernel_name).render(
                 data_t=self.data_t, **kwargs)
 
-        src = self.src_tpl.get_def("%s_src" % kernel_name).render(
-                data_t=self.data_t, **kwargs)
-
-        return arguments, src
+        return "\n".join([self.preamble, knl])
 
     def get_kernel(self, kernel_name, **kwargs):
         data = kernel_name, tuple(kwargs.items())
         if data in self.cache:
             return profile_kernel(self.cache[data], kernel_name)
         else:
-            args, src = self._get_code(kernel_name, **kwargs)
-            knl = ElementwiseKernel(
-                self.ctx, args, src,
-                kernel_name, preamble=self.preamble
-            )
-            self.cache[data] = knl
-            return profile_kernel(knl, kernel_name)
+            src = self._get_code(kernel_name, **kwargs)
+            prg = cl.Program(self.ctx, src).build()
+            def call(*args):
+                knl = getattr(prg, kernel_name)
+                event = knl(self.queue, (args[0].size,), None, *args)
+                return event
+            self.cache[data] = call
+            return profile_kernel(call, kernel_name)

@@ -1,6 +1,8 @@
 # cython: embedsignature=True
 from libcpp.map cimport map
 from libcpp.pair cimport pair
+import numpy as np
+cimport numpy as np
 
 from pysph.base.gpu_nnps_base cimport *
 
@@ -26,6 +28,8 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
     cdef object helper
     cdef object radix_sort
     cdef object make_vec
+
+    cdef np.ndarray cell_size_arg
 
     cdef bint _sorted
     cdef bint dst_src
