@@ -4,7 +4,8 @@ from mako.template import Template
 import os
 import sys
 
-from pysph.base.opencl import profile_kernel, get_elwise_kernel
+from pysph.base.opencl import profile_kernel
+from pysph.base.gpu_manager import get_elwise_kernel
 
 
 class GPUNNPSHelper(object):

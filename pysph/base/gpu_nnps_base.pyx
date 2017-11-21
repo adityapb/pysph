@@ -31,8 +31,10 @@ from pyopencl.elementwise import ElementwiseKernel
 
 from pysph.base.nnps_base cimport *
 from pysph.base.config import get_config
-from pysph.base.opencl import (DeviceArray, DeviceHelper, get_context,
-                                get_queue, set_context, set_queue)
+from pysph.base.opencl import (get_context, get_queue,
+                               set_context, set_queue)
+
+from pysph.base.gpu_utils import DeviceArray, DeviceHelper
 
 # Particle Tag information
 from pyzoltan.core.carray cimport BaseArray, aligned_malloc, aligned_free

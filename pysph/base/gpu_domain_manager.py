@@ -2,7 +2,7 @@ import numpy as np
 import pyopencl as cl
 import pyopencl.array
 
-from pysph.base.opencl import get_config
+from pysph.base.config import get_config
 
 
 class GPUDomainManager(object):

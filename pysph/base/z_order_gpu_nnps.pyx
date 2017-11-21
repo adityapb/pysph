@@ -22,7 +22,8 @@ cimport numpy as np
 from mako.template import Template
 
 from pysph.base.gpu_nnps_helper import GPUNNPSHelper
-from pysph.base.opencl import DeviceArray, get_config
+from pysph.base.config import get_config
+from pysph.base.gpu_utils import DeviceArray
 
 
 IF UNAME_SYSNAME == "Windows":
