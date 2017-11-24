@@ -4,6 +4,7 @@ from mako.template import Template
 import pysph.base.gpu_manager as gm
 from pysph.base.particle_array import ParticleArray
 from pysph.base.config import get_config
+from pysph.base import thrust
 
 
 # args: uint* indices, dtype array, int length
@@ -105,10 +106,15 @@ class DeviceArray(object):
             return
 
         if not input_sorted:
-            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices",
-                                                  "indices[i]", ["indices"])
+            if get_config().use_opencl():
+                radix_sort = gm.get_radix_sort_kernel("unsigned int* indices",
+                                                      "indices[i]", ["indices"])
 
-            (sorted_indices,), event = radix_sort(indices)
+                (sorted_indices,), event = radix_sort(indices)
+
+            if get_config().use_cuda():
+                thrust.sort(indices)
+                sorted_indices = indices
 
         else:
             sorted_indices = indices
@@ -285,10 +291,15 @@ class DeviceHelper(object):
         indices = gm.arange(0, num_particles, 1,
                 dtype=np.uint32)
 
-        radix_sort = gm.get_radix_sort_kernel("unsigned int* indices, unsigned int* tags",
-                                            "tags[i]", ["indices"])
+        if get_config().use_opencl:
+            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices, unsigned int* tags",
+                                                "tags[i]", ["indices"])
 
-        (sorted_indices,), event = radix_sort(indices, tag_arr)
+            (sorted_indices,), event = radix_sort(indices, tag_arr)
+        if get_config().use_cuda:
+            tag_arr_copy = self._data['tag'].copy().array
+            thrust.sort_by_key(indices, tag_arr_copy)
+            sorted_indices = indices
         self.align(sorted_indices)
 
         tag_arr = self._data['tag'].array
@@ -334,10 +345,15 @@ class DeviceHelper(object):
             msg += 'number of particles in array'
             raise ValueError(msg)
 
-        radix_sort = gm.get_radix_sort_kernel("unsigned int* indices",
-                                           "indices[i]", ["indices"])
+        if get_config().use_opencl:
+            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices",
+                                               "indices[i]", ["indices"])
 
-        (sorted_indices,), event = radix_sort(indices)
+            (sorted_indices,), event = radix_sort(indices)
+
+        if get_config().use_cuda:
+            thrust.sort(indices)
+            sorted_indices = indices
 
         for prop in self.properties:
             self._data[prop].remove(sorted_indices, 1)

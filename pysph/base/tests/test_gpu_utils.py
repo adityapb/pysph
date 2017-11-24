@@ -3,8 +3,8 @@ import pytest
 import numpy as np
 
 from pysph.base.config import get_config
-get_config().use_opencl = True
-#get_config().use_cuda = True
+#get_config().use_opencl = True
+get_config().use_cuda = True
 
 #pytest.importorskip("pysph.base.gpu_utils")
 
