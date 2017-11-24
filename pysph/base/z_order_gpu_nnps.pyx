@@ -63,6 +63,7 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
         self.pid_keys = []
         self.cids = []
         self.cid_to_idx = []
+        self.nbr_box_indices = []
 
         for i from 0<=i<self.narrays:
             pa_wrapper = <NNPSParticleArrayWrapper>self.pa_wrappers[i]
@@ -72,6 +73,7 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
             self.pid_keys.append(DeviceArray(np.uint64, n=num_particles))
             self.cids.append(DeviceArray(np.uint32, n=num_particles))
             self.cid_to_idx.append(DeviceArray(np.int32))
+            self.nbr_box_indices.append(DeviceArray(np.int32))
 
         self.curr_cid = 1 + cl.array.zeros(self.queue, 1, dtype=np.uint32)
         self.max_cid_src = cl.array.zeros(self.queue, 1, dtype=np.int32)
@@ -127,20 +129,26 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                 self.cids[pa_index].array, self.curr_cid)
 
         cdef unsigned int num_cids = <unsigned int> (self.curr_cid.get())
-        self.cid_to_idx[pa_index].resize(27 * num_cids)
-        self.cid_to_idx[pa_index].fill(-1)
+        self.cid_to_idx[pa_index].resize(num_cids)
+        self.nbr_box_indices[pa_index].resize(20 * num_cids)
+        self.nbr_box_indices[pa_index].fill(-1)
 
         self.max_cid[pa_index] = num_cids
 
         map_cid_to_idx = self.helper.get_kernel("map_cid_to_idx")
 
-        map_cid_to_idx(
-            pa_gpu.x, pa_gpu.y, pa_gpu.z,
-            pa_wrapper.get_number_of_particles(), self.cell_size,
-            self.make_vec(self.xmin[0], self.xmin[1], self.xmin[2]),
-            self.pids[pa_index].array, self.pid_keys[pa_index].array,
-            self.cids[pa_index].array, self.cid_to_idx[pa_index].array
-        )
+        try:
+            map_cid_to_idx(
+                pa_gpu.x, pa_gpu.y, pa_gpu.z,
+                pa_wrapper.get_number_of_particles(), self.cell_size,
+                self.make_vec(self.xmin[0], self.xmin[1], self.xmin[2]),
+                self.pids[pa_index].array, self.pid_keys[pa_index].array,
+                self.cids[pa_index].array, self.cid_to_idx[pa_index].array,
+                self.nbr_box_indices[pa_index].array
+            )
+
+        except Exception as e:
+            print e
 
         fill_cids = self.helper.get_kernel("fill_cids")
 
@@ -230,7 +238,7 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                 self.pids[self.dst_index].array,
                 self.pids[self.src_index].array,
                 self.max_cid[self.src_index], self.cids[self.dst_index].array,
-                self.cid_to_idx[self.src_index].array,
+                self.nbr_box_indices[self.src_index].array,
                 self.overflow_cid_to_idx.array, self.dst_to_src.array,
                 nbr_lengths, self.radius_scale2, self.cell_size)
 
@@ -250,7 +258,7 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                 self.pids[self.dst_index].array,
                 self.pids[self.src_index].array,
                 self.max_cid[self.src_index], self.cids[self.dst_index].array,
-                self.cid_to_idx[self.src_index].array,
+                self.nbr_box_indices[self.src_index].array,
                 self.overflow_cid_to_idx.array, self.dst_to_src.array,
                 start_indices, nbrs, self.radius_scale2, self.cell_size)
 

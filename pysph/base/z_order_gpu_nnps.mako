@@ -39,11 +39,13 @@
 <%def name="map_cid_to_idx_args(data_t)" cached="True">
     ${data_t}* x, ${data_t}* y, ${data_t}* z, int num_particles,
     ${data_t} cell_size, ${data_t}3 min, unsigned int* pids,
-    unsigned long* keys, unsigned int* cids, int* cid_to_idx
+    unsigned long* keys, unsigned int* cids, int* cid_to_idx,
+    int* nbr_box_indices
 </%def>
 
 <%def name="map_cid_to_idx_src(data_t)" cached="True">
     unsigned int cid = cids[i];
+    unsigned long orig_key = keys[i];
 
     if(i != 0 && cid == 0)
         PYOPENCL_ELWISE_CONTINUE;
@@ -52,7 +54,7 @@
     int idx;
     unsigned long key;
     int nbr_boxes_length;
-    ${data_t}3 c;
+    unsigned long c_x, c_y, c_z;
 
     unsigned int pid = pids[i];
 
@@ -60,20 +62,47 @@
         x[pid] - min.x,
         y[pid] - min.y,
         z[pid] - min.z,
-        cell_size, c.x, c.y, c.z
+        cell_size, c_x, c_y, c_z
         );
 
-    unsigned long* nbr_boxes[27];
+    unsigned long nbr_boxes[27];
 
-    nbr_boxes_length = neighbor_boxes(c.x, c.y, c.z, nbr_boxes);
+    nbr_boxes_length = neighbor_boxes(c_x, c_y, c_z, nbr_boxes);
 
-    #pragma unroll
-    for(j=0; j<nbr_boxes_length; j++)
+    cid_to_idx[cid] = i;
+
+    unsigned long contig_key = interleave((c_x - (c_x % 2)),
+                                          (c_y - (c_y % 2)),
+                                          (c_z - (c_z % 2)));
+
+    insertion_sort(nbr_boxes, 27);
+
+    int curr = 0;
+    int curr_idx = 1;
+
+    while(curr < 27)
     {
-        key = nbr_boxes[j];
+        key = nbr_boxes[curr];
+        if(key == contig_key)
+        {
+            for(j=0; j<8; j++)
+            {
+                idx = find_idx(keys, num_particles, key);
+                if(idx != -1)
+                    break;
+                key++;
+            }    
+            nbr_box_indices[20*cid] = idx;
+            curr += 8;
+            continue;
+        }
+
         idx = find_idx(keys, num_particles, key);
-        cid_to_idx[27*cid + j] = idx;
+        nbr_box_indices[20*cid + curr_idx] = idx;
+        curr++;
+        curr_idx++;
     }
+
 </%def>
 
 
@@ -100,7 +129,7 @@
 </%def>
 
 <%def name="map_dst_to_src_src(data_t)" cached="True">
-    int idx = cid_to_idx_dst[27*i];
+    int idx = cid_to_idx_dst[i];
     unsigned long key = keys_dst[idx];
     int idx_src = find_idx(keys_src, num_particles_src, key);
     dst_to_src[i] = (idx_src == -1) ? atomic_inc(&max_cid_src[0]) : cids_src[idx_src];
@@ -121,7 +150,7 @@
     if(cid < max_cid_src)
         PYOPENCL_ELWISE_CONTINUE;
 
-    int idx = cid_to_idx_dst[27*i];
+    int idx = cid_to_idx_dst[i];
 
     unsigned int j;
     unsigned long key;
@@ -179,7 +208,7 @@
 
 
     unsigned int cid = cids[i];
-    __global int* nbr_boxes = cid_to_idx;
+    __global int* nbr_boxes = nbr_box_indices;
     unsigned int start_id_nbr_boxes;
 
 
@@ -192,7 +221,7 @@
             nbr_boxes = overflow_cid_to_idx;
         }
     % else:
-        start_id_nbr_boxes = 27*cid;
+      start_id_nbr_boxes = 20*cid;
     % endif
 
 </%def>
@@ -203,7 +232,7 @@
     ${data_t}* s_z, ${data_t}* s_h,
     ${data_t}3 min, unsigned int num_particles, unsigned long* keys,
     unsigned int* pids_dst, unsigned int* pids_src, unsigned int max_cid_src,
-    unsigned int* cids, int* cid_to_idx, int* overflow_cid_to_idx,
+    unsigned int* cids, int* nbr_box_indices, int* overflow_cid_to_idx,
     unsigned int* dst_to_src, unsigned int* nbr_lengths, ${data_t} radius_scale2,
     ${data_t} cell_size
 </%def>
@@ -215,8 +244,23 @@
 
     ${data_t}4 s;
 
+    idx = nbr_boxes[start_id_nbr_boxes];
+    key = keys[idx];
+
+    while(idx < num_particles && keys[idx] < key + 8)
+    {
+        pid = pids_src[idx];
+        s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
+        h_j = radius_scale2 * s.w * s.w;
+        dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
+        if(dist < h_i || dist < h_j)
+            length++;
+        idx++;
+    }
+
+
     #pragma unroll
-    for(j=0; j<27; j++)
+    for(j=1; j<20; j++)
     {
         idx = nbr_boxes[start_id_nbr_boxes + j];
         if(idx == -1)
@@ -246,7 +290,7 @@
     ${data_t}* s_z, ${data_t}* s_h,
     ${data_t}3 min, unsigned int num_particles, unsigned long* keys,
     unsigned int* pids_dst, unsigned int* pids_src, unsigned int max_cid_src,
-    unsigned int* cids, int* cid_to_idx, int* overflow_cid_to_idx,
+    unsigned int* cids, int* nbr_box_indices, int* overflow_cid_to_idx,
     unsigned int* dst_to_src, unsigned int* start_indices, unsigned int* nbrs,
     ${data_t} radius_scale2, ${data_t} cell_size
 </%def>
@@ -259,8 +303,26 @@
 
     ${data_t}4 s;
 
+    idx = nbr_boxes[start_id_nbr_boxes];
+    key = keys[idx];
+
+    while(idx < num_particles && keys[idx] < key + 8)
+    {
+        pid = pids_src[idx];
+        s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
+        h_j = radius_scale2 * s.w * s.w;
+        dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
+        if(dist < h_i || dist < h_j)
+        {
+            nbrs[start_idx + curr_idx] = pid;
+            curr_idx++;
+        }
+        idx++;
+    }
+
+
     #pragma unroll
-    for(j=0; j<27; j++)
+    for(j=0; j<20; j++)
     {
         idx = nbr_boxes[start_id_nbr_boxes + j];
         if(idx == -1)

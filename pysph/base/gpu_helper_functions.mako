@@ -36,6 +36,26 @@
         return (p | (q << 1) | (r << 2));
     }
 
+
+    void insertion_sort(unsigned long* arr, int n)
+    {
+        int i, j;
+        unsigned long key;
+        for (i = 1; i < n; i++)
+        {
+            key = arr[i];
+            j = i-1;
+     
+            while (j >= 0 && arr[j] > key)
+            {
+                arr[j+1] = arr[j];
+                j = j-1;
+            }
+            arr[j+1] = key;
+        }
+    }
+
+
     inline int find_idx(__global ulong* keys, \
             int num_particles, ulong key)
     {
@@ -67,10 +87,9 @@
     inline int neighbor_boxes(int c_x, int c_y, int c_z, \
         ulong* nbr_boxes)
     {
-        int nbr_boxes_length = 1;
+        int nbr_boxes_length = 0;
         int j, k, m;
         ulong key;
-        nbr_boxes[0] = interleave(c_x, c_y, c_z);
 
         #pragma unroll
         for(j=-1; j<2; j++)
@@ -81,7 +100,7 @@
                 #pragma unroll
                 for(m=-1; m<2; m++)
                 {
-                    if((j != 0 || k != 0 || m != 0) && c_x+m >= 0 && c_y+k >= 0 && c_z+j >= 0)
+                    if(c_x+m >= 0 && c_y+k >= 0 && c_z+j >= 0)
                     {
                         key = interleave(c_x+m, c_y+k, c_z+j);
                         nbr_boxes[nbr_boxes_length] = key;
