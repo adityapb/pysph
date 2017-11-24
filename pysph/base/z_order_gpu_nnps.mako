@@ -71,16 +71,16 @@
 
     cid_to_idx[cid] = i;
 
-    unsigned long contig_key = interleave((c_x - (c_x % 2)),
-                                          (c_y - (c_y % 2)),
-                                          (c_z - (c_z % 2)));
+    unsigned long contig_key = interleave(((c_x >> 1) << 1),
+                                          ((c_y >> 1) << 1),
+                                          ((c_z >> 1) << 1));
 
-    insertion_sort(nbr_boxes, 27);
+    insertion_sort(nbr_boxes, nbr_boxes_length);
 
     int curr = 0;
     int curr_idx = 1;
 
-    while(curr < 27)
+    while(curr < nbr_boxes_length)
     {
         key = nbr_boxes[curr];
         if(key == contig_key)
