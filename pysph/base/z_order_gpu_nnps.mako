@@ -166,6 +166,7 @@
         cell_size, c.x, c.y, c.z
         );
 
+
     unsigned long* nbr_boxes[27];
 
     nbr_boxes_length = neighbor_boxes(c.x, c.y, c.z, nbr_boxes);
@@ -196,6 +197,10 @@
         q.z - min.z,
         cell_size, c.x, c.y, c.z
         );
+
+    unsigned long contig_key = interleave(((c.x >> 1) << 1),
+                                          ((c.y >> 1) << 1),
+                                          ((c.z >> 1) << 1));
 
     int idx;
     unsigned int j;
@@ -247,7 +252,7 @@
     idx = nbr_boxes[start_id_nbr_boxes];
     key = keys[idx];
 
-    while(idx < num_particles && keys[idx] < key + 8)
+    while(idx < num_particles && keys[idx] < contig_key + 8)
     {
         pid = pids_src[idx];
         s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
@@ -306,7 +311,7 @@
     idx = nbr_boxes[start_id_nbr_boxes];
     key = keys[idx];
 
-    while(idx < num_particles && keys[idx] < key + 8)
+    while(idx < num_particles && keys[idx] < contig_key + 8)
     {
         pid = pids_src[idx];
         s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
