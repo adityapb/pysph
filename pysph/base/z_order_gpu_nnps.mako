@@ -81,6 +81,8 @@
     int curr_idx = 1;
     int idx_prev = 0;
 
+    unsigned int start_idx = 20 * cid;
+
     while(curr < nbr_boxes_length)
     {
         key = nbr_boxes[curr];
@@ -93,7 +95,7 @@
                     break;
                 key++;
             }    
-            nbr_box_indices[20*cid] = idx + idx_prev;
+            nbr_box_indices[start_idx] = idx + idx_prev;
             idx_prev += idx;
             curr += 8;
         }
@@ -102,12 +104,12 @@
             idx = find_idx(keys + idx_prev, num_particles - idx_prev, key);
             if(idx != -1)
             {
-                nbr_box_indices[20*cid + curr_idx] = idx + idx_prev;
+                nbr_box_indices[start_idx + curr_idx] = idx + idx_prev;
                 idx_prev += idx;
             }
             else
             {
-                nbr_box_indices[20*cid + curr_idx] = idx;
+                nbr_box_indices[start_idx + curr_idx] = idx;
             }
 
             curr++;
@@ -341,7 +343,7 @@
 
 
     #pragma unroll
-    for(j=0; j<20; j++)
+    for(j=1; j<20; j++)
     {
         idx = nbr_boxes[start_id_nbr_boxes + j];
         if(idx == -1)
