@@ -79,6 +79,7 @@
 
     int curr = 0;
     int curr_idx = 1;
+    int idx_prev = 0;
 
     while(curr < nbr_boxes_length)
     {
@@ -87,20 +88,31 @@
         {
             for(j=0; j<8; j++)
             {
-                idx = find_idx(keys, num_particles, key);
+                idx = find_idx(keys + idx_prev, num_particles - idx_prev, key);
                 if(idx != -1)
                     break;
                 key++;
             }    
-            nbr_box_indices[20*cid] = idx;
+            nbr_box_indices[20*cid] = idx + idx_prev;
+            idx_prev += idx;
             curr += 8;
-            continue;
         }
+        else
+        {
+            idx = find_idx(keys + idx_prev, num_particles - idx_prev, key);
+            if(idx != -1)
+            {
+                nbr_box_indices[20*cid + curr_idx] = idx + idx_prev;
+                idx_prev += idx;
+            }
+            else
+            {
+                nbr_box_indices[20*cid + curr_idx] = idx;
+            }
 
-        idx = find_idx(keys, num_particles, key);
-        nbr_box_indices[20*cid + curr_idx] = idx;
-        curr++;
-        curr_idx++;
+            curr++;
+            curr_idx++;
+        }
     }
 
 </%def>
@@ -189,7 +201,7 @@
 
     ${data_t}4 q = (${data_t}4)(d_x[qid], d_y[qid], d_z[qid], d_h[qid]);
 
-    int3 c;
+    ulong3 c;
 
     FIND_CELL_ID(
         q.x - min.x,
@@ -226,7 +238,7 @@
             nbr_boxes = overflow_cid_to_idx;
         }
     % else:
-      start_id_nbr_boxes = 20*cid;
+        start_id_nbr_boxes = 20*cid;
     % endif
 
 </%def>
@@ -268,8 +280,10 @@
     for(j=1; j<20; j++)
     {
         idx = nbr_boxes[start_id_nbr_boxes + j];
+
         if(idx == -1)
             continue;
+
         key = keys[idx];
 
         while(idx < num_particles && keys[idx] == key)
