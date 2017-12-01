@@ -26,13 +26,13 @@ cimport cython
 
 import pyopencl as cl
 import pyopencl.array
-from pyopencl.scan import ExclusiveScanKernel
+from pyopencl.scan import ExclusiveScanKernel, GenericScanKernel
 from pyopencl.elementwise import ElementwiseKernel
 
 from pysph.base.nnps_base cimport *
 from pysph.base.config import get_config
 from pysph.base.opencl import (DeviceArray, DeviceHelper, get_context,
-                                get_queue, set_context, set_queue)
+                                profile, get_queue, set_context, set_queue)
 
 # Particle Tag information
 from pyzoltan.core.carray cimport BaseArray, aligned_malloc, aligned_free
@@ -87,14 +87,19 @@ cdef class GPUNeighborCache:
         self._neighbors_gpu.resize(total_size)
 
         self._start_idx_gpu = self._nbr_lengths_gpu.copy()
+        self._start_idx_gpu.array[0] = 0
 
         # Do prefix sum on self._neighbor_lengths for the self._start_idx
         if self._get_start_indices is None:
-            self._get_start_indices = ExclusiveScanKernel(
-                self._nnps.ctx, np.uint32, scan_expr="a+b", neutral="0"
+            self._get_start_indices = GenericScanKernel(
+                self._nnps.ctx, np.uint32, arguments="__global uint* indices",
+                scan_expr="a+b", neutral="0",
+                input_expr="indices[i]", output_statement="indices[i+1] = item;"
             )
 
-        self._get_start_indices(self._start_idx_gpu.array)
+        event = self._get_start_indices(self._start_idx_gpu.array)
+        profile("prefix_sum", event)
+
         self._nnps.find_nearest_neighbors_gpu(self._neighbors_gpu.array,
                 self._start_idx_gpu.array)
         self._cached = True

@@ -89,7 +89,10 @@ def get_profile_info():
             _profile_info["sort"] + _profile_info["fill_unique_cids"] + \
             _profile_info["fill_pids"] + _profile_info["fill_cids"]
 
-    _profile_info["nnps"] = _profile_info["z_order_nbrs"] + _profile_info["z_order_nbr_lengths"]
+    _profile_info["nnps"] = _profile_info["z_order_nbrs"] + \
+            _profile_info["z_order_nbr_lengths"] + \
+            _profile_info["prefix_sum"]
+
     return _profile_info
 
 
