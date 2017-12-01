@@ -83,6 +83,26 @@ def profile(name, event):
     _profile_info[name] += time
 
 
+def get_profile_info():
+    global _profile_info
+    _profile_info["build"] = _profile_info["map_cid_to_idx"] + \
+            _profile_info["sort"] + _profile_info["fill_unique_cids"] + \
+            _profile_info["fill_pids"] + _profile_info["fill_cids"]
+
+    _profile_info["nnps"] = _profile_info["z_order_nbrs"] + _profile_info["z_order_nbr_lengths"]
+    return _profile_info
+
+
+def clear_profile_info():
+    global _profile_info
+    _profile_info = defaultdict(float)
+
+
+def add_time(name, time):
+    global _profile_info
+    _profile_info[name] += time
+
+
 def print_profile():
     global _profile_info
     _profile_info = sorted(_profile_info.items(), key=itemgetter(1),
@@ -101,7 +121,9 @@ def print_profile():
 def profile_kernel(kernel, name):
     def _profile_knl(*args):
         event = kernel(*args)
-        profile(name, event)
+        event.wait()
+        time = (event.profile.end - event.profile.start) * 1e-9
+        _profile_info[name] += time
         return event
     if get_config().profile:
         return _profile_knl

@@ -22,7 +22,9 @@ cimport numpy as np
 from mako.template import Template
 
 from pysph.base.gpu_nnps_helper import GPUNNPSHelper
-from pysph.base.opencl import DeviceArray, get_config, profile
+from pysph.base.opencl import DeviceArray, get_config, profile, add_time
+
+import time
 
 
 IF UNAME_SYSNAME == "Windows":
@@ -92,6 +94,12 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
         self.sorted = True
         return self.pids[pa_index].array, update_pids
 
+    def _get_index_size(self):
+        return 3 * max(int(np.log2((self.xmax[2] - self.xmin[2]) / self.cell_size) + 1),
+                int(np.log2(
+                (self.xmax[1] - self.xmin[1]) / self.cell_size) + 1),
+                int(np.log2((self.xmax[0] - self.xmin[0]) / self.cell_size) + 1))
+
     cpdef _bin(self, int pa_index):
         self.sorted = False
         cdef NNPSParticleArrayWrapper pa_wrapper = self.pa_wrappers[pa_index]
@@ -112,11 +120,24 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                 sort_arg_names=["pids", "keys"]
             )
 
+        idx_size = self._get_index_size()
+        self.queue.finish()
 
-        (sorted_indices, sorted_keys), evnt = self.radix_sort(
-            self.pids[pa_index].array, self.pid_keys[pa_index].array, key_bits=64
+        start = time.time()
+
+        (sorted_indices, sorted_keys), evnt, gpu_time = self.radix_sort(
+            self.pids[pa_index].array, self.pid_keys[pa_index].array, key_bits=idx_size,
+            queue=self.queue
         )
-        profile("radix_sort", evnt)
+
+        add_time("sort", gpu_time)
+
+        self.queue.finish()
+
+        end = time.time()
+
+        print end - start
+
         self.pids[pa_index].set_data(sorted_indices)
         self.pid_keys[pa_index].set_data(sorted_keys)
 
