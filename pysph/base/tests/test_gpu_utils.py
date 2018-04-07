@@ -30,7 +30,7 @@ class TestDeviceArray(TestCase):
         # Then
         assert len(dev_array.get_data()) == 64
         assert dev_array.length == 16
-        assert dev_array.array[0] == 1
+        assert dev_array.array[0].get() == np.array(1, dtype=np.int32)
 
     def test_resize_with_reallocation(self):
         # Given
@@ -42,7 +42,7 @@ class TestDeviceArray(TestCase):
         # Then
         assert len(dev_array.get_data()) == 64
         assert dev_array.length == 64
-        assert dev_array.array[0] == 1
+        assert dev_array.array[0].get() == np.array(1, dtype=np.int32)
 
     def test_resize_without_reallocation(self):
         # Given
@@ -54,7 +54,7 @@ class TestDeviceArray(TestCase):
         # Then
         assert len(dev_array.get_data()) == 128
         assert dev_array.length == 64
-        assert dev_array.array[0] == 1
+        assert dev_array.array[0].get() == np.array(1, dtype=np.int32)
 
     def test_copy(self):
         # Given
@@ -66,8 +66,8 @@ class TestDeviceArray(TestCase):
         # Then
         assert np.all(dev_array.array.get() == dev_array_copy.array.get())
 
-        dev_array_copy.array[0] = 2
-        assert dev_array.array[0] != dev_array_copy.array[0]
+        dev_array_copy.array[0] = np.array(2, dtype=np.int32)
+        assert dev_array.array[0].get() != dev_array_copy.array[0].get()
 
     def test_append_with_reallocation(self):
         # Given
@@ -77,7 +77,7 @@ class TestDeviceArray(TestCase):
         dev_array.append(2)
 
         # Then
-        assert dev_array.array[-1] == 2
+        assert dev_array.array[-1].get() == np.array(2, dtype=np.int32)
         assert len(dev_array.get_data()) == 32
 
     def test_append_without_reallocation(self):
@@ -89,7 +89,7 @@ class TestDeviceArray(TestCase):
         dev_array.append(2)
 
         # Then
-        assert dev_array.array[-1] == 2
+        assert dev_array.array[-1].get() == np.array(2, dtype=np.int32)
         assert len(dev_array.get_data()) == 20
 
     def test_extend(self):
@@ -160,7 +160,8 @@ class TestDeviceArray(TestCase):
         # Given
         dev_array = self.make_dev_array()
         dev_array.fill(2)
-        dev_array.array[0], dev_array.array[1] = 1, 10
+        dev_array.array[0], dev_array.array[1] = \
+                np.array(1, dtype=np.int32), np.array(10, dtype=np.int32)
 
         # When
         dev_array.update_min_max()

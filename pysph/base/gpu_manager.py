@@ -20,6 +20,7 @@ if opencl():
     from pyopencl.cltypes import make_float3
     from pyopencl.cltypes import make_double3
     from pyopencl.tools import dtype_to_ctype
+    from pyopencl._cluda import CLUDA_PREAMBLE
 
 if cuda():
     import pycuda as cu
@@ -30,13 +31,14 @@ if cuda():
     #from pycuda.gpuarray.vec import make_double3
     from pycuda.tools import dtype_to_ctype
     import pycuda.autoinit
+    from pycuda._cluda import CLUDA_PREAMBLE
 
 
 def to_device(array):
     if opencl():
         return gpu_array.to_device(get_queue(), array)
     if cuda():
-        return cu.driver.to_device(array)
+        return cu.gpuarray.to_gpu(array)
 
 
 def ones_like(array):
@@ -85,6 +87,17 @@ def get_exclusive_scan_kernel(*args, **kwargs):
         return scan.ExclusiveScanKernel(*args, **kwargs)
 
 
+def get_generic_scan_kernel(*args, **kwargs):
+    if 'name' in kwargs:
+        name = kwargs.pop('name')
+    if opencl():
+        knl = GenericScanKernel(get_context(),
+                *args, **kwargs)
+        return profile_kernel(knl, name)
+    if cuda():
+        return GenericScanKernel(*args, **kwargs)
+
+
 def get_elwise_kernel(kernel_name, args, src, preamble=""):
     if opencl():
         ctx = get_context()
@@ -103,18 +116,15 @@ def get_elwise_kernel(kernel_name, args, src, preamble=""):
 
 def get_radix_sort_kernel(args, key_expr, sort_arg_names,
         scan_kernel=None):
-    if opencl():
-        if scan_kernel is None:
-            scan_kernel = GenericScanKernel
-        ctx = get_context()
-        radix_sort = cl.algorithm.RadixSort(
-            ctx, args,
-            scan_kernel=scan_kernel, key_expr=key_expr,
-            sort_arg_names=sort_arg_names
-            )
+    if scan_kernel is None:
+        scan_kernel = GenericScanKernel
+    ctx = get_context()
+    radix_sort = cl.algorithm.RadixSort(
+        ctx, args,
+        scan_kernel=scan_kernel, key_expr=key_expr,
+        sort_arg_names=sort_arg_names
+        )
 
-        return radix_sort
-    if cuda():
-        raise Exception("Sorting not supported yet!")
+    return radix_sort
 
 

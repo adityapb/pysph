@@ -105,28 +105,29 @@ class DeviceArray(object):
         if len(indices) > self.length:
             return
 
-        if not input_sorted:
-            if get_config().use_opencl():
-                radix_sort = gm.get_radix_sort_kernel("unsigned int* indices",
-                                                      "indices[i]", ["indices"])
+        if_remove = DeviceArray(np.int32, n=self.length)
+        if_remove.fill(0)
+        new_array = self.copy()
 
-                (sorted_indices,), event = radix_sort(indices)
+        fill_if_remove_knl = gm.get_elwise_kernel("fill_if_remove_knl",
+                "int* indices, int* if_remove",
+                "if_remove[indices[i]] = 1;")
 
-            if get_config().use_cuda():
-                thrust.sort(indices)
-                sorted_indices = indices
+        fill_if_remove_knl(indices, if_remove.array)
 
-        else:
-            sorted_indices = indices
+        remove_knl = gm.get_generic_scan_kernel(np.int32,
+                arguments="GLOBAL_MEM int *if_remove,\
+                            GLOBAL_MEM %(dtype)s *array,\
+                            GLOBAL_MEM %(dtype)s *new_array" % \
+                        {"dtype": gm.dtype_to_ctype(self.dtype)},
+                        input_expr="if_remove[i]",
+                        scan_expr="a+b", neutral="0",
+                        output_statement="""
+                            if(!if_remove[i]) new_array[i - item] = array[i];
+                        """, preamble=gm.CLUDA_PREAMBLE)
 
-        args = "unsigned int* indices, %(dtype)s* array, unsigned int length" % \
-                {"dtype" : gm.dtype_to_ctype(self.dtype)}
-        src = REMOVE_KNL.render()
-        remove = gm.get_elwise_kernel("remove", args, src)
-
-        remove(sorted_indices, self.array, self.length)
-        self.length -= len(indices)
-        self._update_array_ref()
+        remove_knl(if_remove.array, self.array, new_array.array)
+        self.set_data(new_array.array[:-len(indices)])
 
     def align(self, indices):
         self.set_data(gm.gpu_array.take(self.array, indices))
@@ -292,8 +293,9 @@ class DeviceHelper(object):
                 dtype=np.uint32)
 
         if get_config().use_opencl:
-            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices, unsigned int* tags",
-                                                "tags[i]", ["indices"])
+            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices,
+                                                  unsigned int* tags",
+                                                  "tags[i]", ["indices"])
 
             (sorted_indices,), event = radix_sort(indices, tag_arr)
         if get_config().use_cuda:
@@ -345,18 +347,35 @@ class DeviceHelper(object):
             msg += 'number of particles in array'
             raise ValueError(msg)
 
-        if get_config().use_opencl:
-            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices",
-                                               "indices[i]", ["indices"])
+        if_remove = DeviceArray(np.int32,
+                n=self.get_number_of_particles())
 
-            (sorted_indices,), event = radix_sort(indices)
+        if_remove.fill(0)
 
-        if get_config().use_cuda:
-            thrust.sort(indices)
-            sorted_indices = indices
+        new_indices = DeviceArray(np.uint32,
+                n=self.get_number_of_particles())
+
+        fill_if_remove_knl = gm.get_elwise_kernel("fill_if_remove_knl",
+                "int* indices, unsigned int* if_remove",
+                "if_remove[indices[i]] = 1;")
+
+        fill_if_remove_knl(indices, if_remove.array)
+
+        remove_knl = gm.get_generic_scan_kernel(np.int32,
+                arguments="GLOBAL_MEM int *if_remove,\
+                            GLOBAL_MEM %(dtype)s *array,\
+                            GLOBAL_MEM %(dtype)s *new_array" % \
+                        {"dtype": gm.dtype_to_ctype(self._dtype)},
+                        input_expr="if_remove[i]",
+                        scan_expr="a+b", neutral="0",
+                        output_statement="""
+                            if(!if_remove[i]) new_array[i - item] = array[i];
+                        """, preamble=gm.CLUDA_PREAMBLE)
+
+        remove_knl(if_remove.array, new_indices.array)
 
         for prop in self.properties:
-            self._data[prop].remove(sorted_indices, 1)
+            self._data[prop].align(new_indices.array[:-len(indices)])
             setattr(self, prop, self._data[prop].array)
 
         if len(indices) > 0:
