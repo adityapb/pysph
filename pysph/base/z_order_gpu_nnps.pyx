@@ -24,6 +24,8 @@ from mako.template import Template
 from pysph.base.gpu_nnps_helper import GPUNNPSHelper
 from pysph.base.config import get_config
 from pysph.base.gpu_utils import DeviceArray
+import pysph.base.gpu_manager as gm
+from pysph.base import thrust
 
 
 IF UNAME_SYSNAME == "Windows":
@@ -74,8 +76,8 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
             self.cids.append(DeviceArray(np.uint32, n=num_particles))
             self.cid_to_idx.append(DeviceArray(np.int32))
 
-        self.curr_cid = 1 + cl.array.zeros(self.queue, 1, dtype=np.uint32)
-        self.max_cid_src = cl.array.zeros(self.queue, 1, dtype=np.int32)
+        self.curr_cid = gm.ones(1, dtype=np.uint32)
+        self.max_cid_src = gm.zeros(1, dtype=np.int32)
 
         self.dst_to_src = DeviceArray(np.uint32)
         self.overflow_cid_to_idx = DeviceArray(np.int32)
@@ -85,7 +87,7 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
 
     def get_spatially_ordered_indices(self, int pa_index):
         def update_pids():
-            pids_new = cl.array.arange(self.queue, 0, num_particles, 1, dtype=np.uint32)
+            pids_new = gm.arange(0, num_particles, 1, dtype=np.uint32)
             self.pids[pa_index].set_data(pids_new)
 
         cdef NNPSParticleArrayWrapper pa_wrapper = self.pa_wrappers[pa_index]
@@ -106,20 +108,24 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                 self.pid_keys[pa_index].array, self.pids[pa_index].array)
 
         if self.radix_sort is None:
-            self.radix_sort = cl.algorithm.RadixSort(
-                self.ctx,
-                "unsigned int* pids, unsigned long* keys",
-                scan_kernel=GenericScanKernel, key_expr="keys[i]",
-                sort_arg_names=["pids", "keys"]
-            )
+            if get_config().use_opencl:
+                self.radix_sort = cl.algorithm.RadixSort(
+                    self.ctx,
+                    "unsigned int* pids, unsigned long* keys",
+                    scan_kernel=GenericScanKernel, key_expr="keys[i]",
+                    sort_arg_names=["pids", "keys"]
+                )
 
+                (sorted_indices, sorted_keys), evnt = self.radix_sort(
+                    self.pids[pa_index].array, self.pid_keys[pa_index].array, key_bits=64
+                )
+                #profile("radix_sort", evnt)
+                self.pids[pa_index].set_data(sorted_indices)
+                self.pid_keys[pa_index].set_data(sorted_keys)
 
-        (sorted_indices, sorted_keys), evnt = self.radix_sort(
-            self.pids[pa_index].array, self.pid_keys[pa_index].array, key_bits=64
-        )
-        #profile("radix_sort", evnt)
-        self.pids[pa_index].set_data(sorted_indices)
-        self.pid_keys[pa_index].set_data(sorted_keys)
+            if get_config().use_cuda:
+                thrust.sort_by_key(self.pids[pa_index].array,
+                                   self.pid_keys[pa_index].array)
 
         self.curr_cid.fill(1)
 

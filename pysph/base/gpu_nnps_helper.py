@@ -5,7 +5,7 @@ import os
 import sys
 
 from pysph.base.opencl import profile_kernel
-from pysph.base.gpu_manager import get_elwise_kernel
+from pysph.base.gpu_manager import get_config, get_elwise_kernel
 
 
 class GPUNNPSHelper(object):
@@ -28,7 +28,7 @@ class GPUNNPSHelper(object):
         )
 
         helper_preamble = helper_tpl.get_def("get_helpers").render(
-            data_t=self.data_t
+            data_t=self.data_t, if_cuda=get_config().use_cuda
         )
         preamble = self.src_tpl.get_def("preamble").render(
             data_t=self.data_t

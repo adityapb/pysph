@@ -54,8 +54,8 @@ def set_queue(q):
 def profile_kernel(kernel, name):
     def _profile_knl(*args):
         event = kernel(*args)
+        print(name, event)
         profile(name, event)
-        return event
     if get_config().profile:
         return _profile_knl
     else:

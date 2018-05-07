@@ -30,8 +30,6 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
     cdef public bint sorted
     cdef bint dst_src
 
-    #cpdef get_spatially_ordered_indices(self, int pa_index)
-
     cpdef _bin(self, int pa_index)
 
     cpdef _refresh(self)

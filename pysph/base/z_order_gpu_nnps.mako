@@ -32,7 +32,7 @@
 </%def>
 
 <%def name="fill_unique_cids_src(data_t)" cached="True">
-    cids[i] = (i != 0 && keys[i] != keys[i-1]) ? atomic_inc(&curr_cid[0]) : 0;
+    cids[i] = (i != 0 && keys[i] != keys[i-1]) ? ATOMIC_INC(&curr_cid[0]) : 0;
 </%def>
 
 
@@ -46,7 +46,7 @@
     unsigned int cid = cids[i];
 
     if(i != 0 && cid == 0)
-        PYOPENCL_ELWISE_CONTINUE;
+        ELWISE_CONTINUE;
 
     unsigned int j;
     int idx;
@@ -63,7 +63,7 @@
         cell_size, c.x, c.y, c.z
         );
 
-    unsigned long* nbr_boxes[27];
+    unsigned long nbr_boxes[27];
 
     nbr_boxes_length = neighbor_boxes(c.x, c.y, c.z, nbr_boxes);
 
@@ -84,7 +84,7 @@
 <%def name="fill_cids_src(data_t)" cached="True">
     unsigned int cid = cids[i];
     if(cid == 0)
-        PYOPENCL_ELWISE_CONTINUE;
+        ELWISE_CONTINUE;
     unsigned int j = i + 1;
     while(j < num_particles && cids[j] == 0)
     {
@@ -103,7 +103,7 @@
     int idx = cid_to_idx_dst[27*i];
     unsigned long key = keys_dst[idx];
     int idx_src = find_idx(keys_src, num_particles_src, key);
-    dst_to_src[i] = (idx_src == -1) ? atomic_inc(&max_cid_src[0]) : cids_src[idx_src];
+    dst_to_src[i] = (idx_src == -1) ? ATOMIC_INC(&max_cid_src[0]) : cids_src[idx_src];
 </%def>
 
 <%def name="fill_overflow_map_args(data_t)" cached="True">
@@ -119,7 +119,7 @@
     // i is the cid in dst
 
     if(cid < max_cid_src)
-        PYOPENCL_ELWISE_CONTINUE;
+        ELWISE_CONTINUE;
 
     int idx = cid_to_idx_dst[27*i];
 
@@ -157,7 +157,7 @@
 
     qid = pids_dst[i];
 
-    ${data_t}4 q = (${data_t}4)(d_x[qid], d_y[qid], d_z[qid], d_h[qid]);
+    ${data_t}4 q = MAKE_VEC(d_x[qid], d_y[qid], d_z[qid], d_h[qid]);
 
     int3 c;
 
@@ -179,7 +179,7 @@
 
 
     unsigned int cid = cids[i];
-    __global int* nbr_boxes = cid_to_idx;
+    GLOBAL_MEM int* nbr_boxes = cid_to_idx;
     unsigned int start_id_nbr_boxes;
 
 
@@ -226,7 +226,7 @@
         while(idx < num_particles && keys[idx] == key)
         {
             pid = pids_src[idx];
-            s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
+            s = MAKE_VEC(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
             h_j = radius_scale2 * s.w * s.w;
             dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
             if(dist < h_i || dist < h_j)
@@ -270,7 +270,7 @@
         while(idx < num_particles && keys[idx] == key)
         {
             pid = pids_src[idx];
-            s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
+            s = MAKE_VEC(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
             h_j = radius_scale2 * s.w * s.w;
             dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
             if(dist < h_i || dist < h_j)

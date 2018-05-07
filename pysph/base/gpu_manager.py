@@ -1,6 +1,7 @@
-# Returns appropriate objects based on OpenCL or cuda()
+# Returns appropriate objects based on OpenCL or CUDA
 from pysph.base.config import get_config
-
+import numpy as np
+from mako.template import Template
 
 def opencl():
     return get_config().use_opencl
@@ -15,7 +16,7 @@ if opencl():
     import pyopencl as cl
     import pyopencl.array as gpu_array
     import pyopencl.algorithm as algorithm
-    from pyopencl.scan import GenericScanKernel
+    import pyopencl.scan as scan
     from pyopencl.elementwise import ElementwiseKernel
     from pyopencl.cltypes import make_float3
     from pyopencl.cltypes import make_double3
@@ -52,7 +53,7 @@ def ones(n, dtype):
     if opencl():
         return 1 + gpu_array.zeros(get_queue(), n, dtype)
     if cuda():
-        return 1 + gpu_array.zeros(n, dtype)
+        return np.array(1, dtype=dtype) + gpu_array.zeros(n, dtype)
 
 
 def empty(n, dtype):
@@ -77,28 +78,29 @@ def arange(start, stop, step, dtype=None):
 
 
 def get_exclusive_scan_kernel(*args, **kwargs):
-    if 'name' in kwargs:
-        name = kwargs.pop('name')
     if opencl():
-        knl = algorithm.ExclusiveScanKernel(get_context(),
+        knl = scan.ExclusiveScanKernel(get_context(),
                 *args, **kwargs)
-        return profile_kernel(knl, name)
+        #return profile_kernel(knl, 'scan')
+        return knl
     if cuda():
         return scan.ExclusiveScanKernel(*args, **kwargs)
 
 
 def get_generic_scan_kernel(*args, **kwargs):
-    if 'name' in kwargs:
-        name = kwargs.pop('name')
     if opencl():
         knl = GenericScanKernel(get_context(),
                 *args, **kwargs)
-        return profile_kernel(knl, name)
+        #return profile_kernel(knl, 'scan')
+        return knl
     if cuda():
         return GenericScanKernel(*args, **kwargs)
 
 
 def get_elwise_kernel(kernel_name, args, src, preamble=""):
+    tpl = Template(CLUDA_PREAMBLE)
+    cluda_preamble = tpl.render(double_support=get_config().use_double)
+    preamble = "\n".join([cluda_preamble, preamble])
     if opencl():
         ctx = get_context()
         knl = ElementwiseKernel(

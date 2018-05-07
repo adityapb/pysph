@@ -34,6 +34,7 @@ from pysph.base.config import get_config
 from pysph.base.opencl import (get_context, get_queue,
                                set_context, set_queue)
 
+import pysph.base.gpu_manager as gm
 from pysph.base.gpu_utils import DeviceArray, DeviceHelper
 
 # Particle Tag information
@@ -82,7 +83,7 @@ cdef class GPUNeighborCache:
         # - Store sum kernel
         # - don't allocate neighbors_gpu each time.
         # - Don't allocate _nbr_lengths and start_idx.
-        total_size_gpu = cl.array.sum(self._nbr_lengths_gpu.array)
+        total_size_gpu = gm.gpu_array.sum(self._nbr_lengths_gpu.array)
         cdef unsigned long total_size = <unsigned long>(total_size_gpu.get())
 
         # Allocate _neighbors_cpu and neighbors_gpu
@@ -92,8 +93,8 @@ cdef class GPUNeighborCache:
 
         # Do prefix sum on self._neighbor_lengths for the self._start_idx
         if self._get_start_indices is None:
-            self._get_start_indices = ExclusiveScanKernel(
-                self._nnps.ctx, np.uint32, scan_expr="a+b", neutral="0"
+            self._get_start_indices = gm.get_exclusive_scan_kernel(
+                np.uint32, scan_expr="a+b", neutral="0"
             )
 
         self._get_start_indices(self._start_idx_gpu.array)
@@ -167,17 +168,18 @@ cdef class GPUNNPS(NNPSBase):
         NNPSBase.__init__(self, dim, particles, radius_scale, ghost_layers,
                 domain, cache, sort_gids)
 
-        if ctx is None:
-            self.ctx = get_context()
-            self.queue = get_queue()
-        else:
-            self.ctx = ctx
-            set_context(ctx)
-            self.queue = cl.CommandQueue(
-                self.ctx,
-                properties=cl.command_queue_properties.PROFILING_ENABLE
-            )
-            set_queue(self.queue)
+        if get_config().use_opencl:
+            if ctx is None:
+                self.ctx = get_context()
+                self.queue = get_queue()
+            else:
+                self.ctx = ctx
+                set_context(ctx)
+                self.queue = cl.CommandQueue(
+                    self.ctx,
+                    properties=cl.command_queue_properties.PROFILING_ENABLE
+                )
+                set_queue(self.queue)
 
         self.use_double = get_config().use_double
         self.dtype = np.float64 if self.use_double else np.float32

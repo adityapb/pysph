@@ -1,19 +1,30 @@
 //CL//
 
-<%def name="get_helpers()" cached="True">
+<%def name="get_helpers(data_t, if_cuda)" cached="True">
     #define NORM2(X, Y, Z) ((X)*(X) + (Y)*(Y) + (Z)*(Z))
 
     #define FIND_CELL_ID(x, y, z, h, c_x, c_y, c_z) \
         c_x = floor((x)/h); c_y = floor((y)/h); c_z = floor((z)/h)
 
-    inline ulong interleave(ulong p, \
-            ulong q, ulong r);
+    %if if_cuda:
+        #define ATOMIC_INC(x) atomicAdd(x, 1)
+        #define ELWISE_CONTINUE continue
+        #define MAKE_VEC(v1, v2, v3, v4) make_${data_t}4(v1, v2, v3, v4)
+    %else:
+        #define ATOMIC_INC(x) atomic_inc(x)
+        #define ELWISE_CONTINUE PYOPENCL_ELWISE_CONTINUE
+        #define MAKE_VEC(v1, v2, v3, v4) (${data_t}4)(v1, v2, v3, v4)
+    %endif
 
-    inline int neighbor_boxes(int c_x, int c_y, int c_z, \
-            ulong* nbr_boxes);
 
-    inline ulong interleave(ulong p, \
-            ulong q, ulong r)
+    WITHIN_KERNEL unsigned long interleave(unsigned long p, \
+            unsigned long q, unsigned long r);
+
+    WITHIN_KERNEL int neighbor_boxes(int c_x, int c_y, int c_z, \
+            unsigned long* nbr_boxes);
+
+    WITHIN_KERNEL unsigned long interleave(unsigned long p, \
+            unsigned long q, unsigned long r)
     {
         p = (p | (p << 32)) & 0x1f00000000ffff;
         p = (p | (p << 16)) & 0x1f0000ff0000ff;
@@ -36,8 +47,8 @@
         return (p | (q << 1) | (r << 2));
     }
 
-    inline int find_idx(__global ulong* keys, \
-            int num_particles, ulong key)
+    WITHIN_KERNEL int find_idx(GLOBAL_MEM unsigned long* keys, \
+            int num_particles, unsigned long key)
     {
         int first = 0;
         int last = num_particles - 1;
@@ -64,12 +75,12 @@
         return -1;
     }
 
-    inline int neighbor_boxes(int c_x, int c_y, int c_z, \
-        ulong* nbr_boxes)
+    WITHIN_KERNEL int neighbor_boxes(int c_x, int c_y, int c_z, \
+        unsigned long* nbr_boxes)
     {
         int nbr_boxes_length = 1;
         int j, k, m;
-        ulong key;
+        unsigned long key;
         nbr_boxes[0] = interleave(c_x, c_y, c_z);
 
         #pragma unroll

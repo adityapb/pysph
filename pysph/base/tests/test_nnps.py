@@ -20,6 +20,7 @@ from pyzoltan.core.carray import UIntArray, IntArray
 import unittest
 from pytest import importorskip
 
+get_config().use_cuda = True
 
 class SimpleNNPSTestCase(unittest.TestCase):
     """Simplified NNPS test case

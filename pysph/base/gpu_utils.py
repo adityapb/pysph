@@ -293,7 +293,7 @@ class DeviceHelper(object):
                 dtype=np.uint32)
 
         if get_config().use_opencl:
-            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices,
+            radix_sort = gm.get_radix_sort_kernel("unsigned int* indices,\
                                                   unsigned int* tags",
                                                   "tags[i]", ["indices"])
 
