@@ -516,9 +516,40 @@ class Scan(object):
             )
             self.c_func = knl
 
+        elif self.backend == 'cuda':
+            if self.is_segment:
+                raise NotImplementedError("Segmented scans not supported \
+                        by CUDA currently")
+
+            from .cuda import set_context, GenericScanKernel
+            set_context()
+
+            input_expr, input_args = self._wrap_ocl_function(self.input_func)
+            output_expr, output_args = self._wrap_ocl_function(
+                self.output_func
+            )
+            segment_expr, segment_args = self._wrap_ocl_function(
+                self.is_segment_func
+            )
+
+            preamble = convert_to_float_if_needed(self.tp.get_code())
+
+            knl = GenericScanKernel(
+                dtype=self.dtype,
+                arguments=input_args,
+                input_expr=input_expr,
+                scan_expr=self.scan_expr,
+                neutral=self.neutral,
+                output_statement=output_expr,
+                is_segment_start_expr=segment_expr,
+                preamble=preamble
+            )
+            self.c_func = knl
+
+
     def _add_address_space(self, arg):
-        if '*' in arg and '__global' not in arg:
-            return '__global ' + arg
+        if '*' in arg and 'GLOBAL_MEM' not in arg:
+            return 'GLOBAL_MEM ' + arg
         else:
             return arg
 
@@ -556,3 +587,11 @@ class Scan(object):
         elif self.backend == 'opencl':
             self.c_func(*c_args)
             self.queue.finish()
+        elif self.backend == 'cuda':
+            import pycuda.driver as drv
+            event = drv.Event()
+            self.c_func(*c_args)
+            event.record()
+            event.synchronize()
+
+

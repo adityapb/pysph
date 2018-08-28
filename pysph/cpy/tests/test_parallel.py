@@ -151,3 +151,29 @@ class TestParallelUtils(unittest.TestCase):
         expect = np.cumsum(data)
         # print(result, y)
         self.assertTrue(np.all(expect[:-1] == result[1:]))
+
+    def test_scan_works_cuda(self):
+        importorskip('pycuda')
+        # Given
+        a = np.arange(10000, dtype=np.int32)
+        data = a.copy()
+        a = wrap(a, backend='cuda')
+
+        @annotate(i='int', ary='intp', return_='int')
+        def input_f(i, ary):
+            return ary[i]
+
+        @annotate(int='i, item', ary='intp')
+        def output_f(i, ary, item):
+            ary[i+1] = item
+
+        # When
+        s = Scan(input_f, output_f, 'a+b', dtype=np.int32, backend='cuda')
+        s(a)
+        a.pull()
+        result = a.data
+
+        # Then
+        expect = np.cumsum(data)
+        # print(result, y)
+        self.assertTrue(np.all(expect[:-1] == result[1:]))
