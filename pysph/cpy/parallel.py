@@ -517,7 +517,7 @@ class Scan(object):
             self.c_func = knl
 
         elif self.backend == 'cuda':
-            if self.is_segment:
+            if self.is_segment_func:
                 raise NotImplementedError("Segmented scans not supported \
                         by CUDA currently")
 
@@ -563,7 +563,7 @@ class Scan(object):
 
         args = [self._add_address_space(arg) for arg in c_data[0]]
         code[:header_idx] = wrap(
-            '{type} {func}({args})'.format(
+            'WITHIN_KERNEL {type} {func}({args})'.format(
                 type=self.type,
                 func=func.__name__,
                 args=', '.join(args)
