@@ -17,8 +17,9 @@ _cuda_ctx = False
 
 
 output_elwise_template = '''
-${dtype} item, prev_item;
+${dtype} item, prev_item, last_item;
 item = scan_out[i];
+last_item = scan_out[size - 1];
 if(i < 1)
     prev_item = neutral;
 else
@@ -57,7 +58,8 @@ class GenericScanKernel(object):
 
         # Output elementwise kernel
         args_out_elwise = ", ".join([arguments,
-            "%(dtype)s *scan_out, %(dtype)s neutral" % {'dtype':dtype_to_ctype(dtype)}])
+            "%(dtype)s *scan_out, %(dtype)s neutral, int size" \
+                    % {'dtype':dtype_to_ctype(dtype)}])
         template = Template(text=output_elwise_template)
         out_oper = template.render(
                 dtype=dtype_to_ctype(dtype),
@@ -75,9 +77,10 @@ class GenericScanKernel(object):
 
         # Scan
         scan_out = self.scan_knl(scan_inp)
+        size = np.asarray(scan_out.size, dtype=np.int32)
 
         neutral = np.asarray(self.neutral, dtype=self.dtype)
-        out_elwise_args = args + (scan_out, neutral)
+        out_elwise_args = args + (scan_out, neutral, size)
         # Output elementwise
         self.out_elwise_knl(*out_elwise_args)
 
