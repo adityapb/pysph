@@ -469,7 +469,7 @@ class Scan(object):
         self.queue = None
         self._generate()
 
-    def _wrap_ocl_function(self, func):
+    def _get_args(self, func):
         if func is not None:
             self.tp.add(func)
             py_data, c_data = self.cython_gen.get_func_signature(func)
@@ -487,6 +487,37 @@ class Scan(object):
             expr = None
         return expr, arguments
 
+    def _wrap_ocl_function(self, func):
+        if func is not None:
+            self.tp.add(func)
+            py_data, c_data = self.cython_gen.get_func_signature(func)
+            self._correct_opencl_address_space(c_data, func)
+            name = func.__name__
+            expr = '{func}({args})'.format(
+                func=name,
+                args=', '.join(c_data[1])
+            )
+            c_data[0][1:] = [convert_to_float_if_needed(arg) \
+                    for arg in c_data[0][1:]]
+            args_data = [c_data[i][1:] for i in [0, 1]]
+        else:
+            args_data = []
+            expr = None
+        return expr, args_data
+
+    def _get_scan_args(self, *args):
+        ignore_args = ['item', 'prev_item', 'last_item']
+        arg_names = []
+        args_with_dtype = []
+
+        for arglist in args:
+            for arg_dtype, arg_name in zip(*arglist):
+                if arg_name not in arg_names and arg_name not in ignore_args:
+                    args_with_dtype.append(arg_dtype)
+                    arg_names.append(arg_name)
+
+        return arg_names, args_with_dtype
+
     def _generate(self):
         if self.backend == 'opencl':
             input_expr, input_args = self._wrap_ocl_function(self.input_func)
@@ -497,6 +528,9 @@ class Scan(object):
                 self.is_segment_func
             )
 
+            self.scan_arg_names, scan_args = self._get_scan_args(
+                    input_args, output_args, segment_args)
+
             preamble = convert_to_float_if_needed(self.tp.get_code())
 
             from .opencl import get_context, get_queue
@@ -506,7 +540,7 @@ class Scan(object):
             knl = GenericScanKernel(
                 ctx,
                 dtype=self.dtype,
-                arguments=input_args,
+                arguments=scan_args,
                 input_expr=input_expr,
                 scan_expr=self.scan_expr,
                 neutral=self.neutral,
@@ -517,11 +551,8 @@ class Scan(object):
             self.c_func = knl
 
         elif self.backend == 'cuda':
-            if self.is_segment_func:
-                raise NotImplementedError("Segmented scans not supported \
-                        by CUDA currently")
-
-            from .cuda import set_context, GenericScanKernel
+            from .cuda import set_context
+            from pycuda.scan import GenericScanKernel
             set_context()
 
             input_expr, input_args = self._wrap_ocl_function(self.input_func)
@@ -532,11 +563,14 @@ class Scan(object):
                 self.is_segment_func
             )
 
+            self.scan_arg_names, scan_args = self._get_scan_args(
+                    input_args, output_args, segment_args)
+
             preamble = convert_to_float_if_needed(self.tp.get_code())
 
             knl = GenericScanKernel(
                 dtype=self.dtype,
-                arguments=input_args,
+                arguments=scan_args,
                 input_expr=input_expr,
                 scan_expr=self.scan_expr,
                 neutral=self.neutral,
@@ -578,8 +612,9 @@ class Scan(object):
         else:
             return x
 
-    def __call__(self, *args):
-        c_args = [self._massage_arg(x) for x in args]
+    def __call__(self, **kwargs):
+        c_args = [self._massage_arg(kwargs.pop(arg)) \
+                for arg in self.scan_arg_names]
         if self.backend == 'cython':
             size = len(c_args[0])
             c_args.insert(0, size)

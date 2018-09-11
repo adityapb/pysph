@@ -137,15 +137,42 @@ class TestParallelUtils(unittest.TestCase):
         def input_f(i, ary):
             return ary[i]
 
-        @annotate(int='i, item', ary='intp')
-        def output_f(i, ary, item):
-            ary[i+1] = item
+        @annotate(int='i, prev_item', ary='intp')
+        def output_f(i, ary, prev_item):
+            ary[i] = prev_item
 
         # When
         s = Scan(input_f, output_f, 'a+b', dtype=np.int32, backend='opencl')
-        s(a)
+        s(ary=a)
         a.pull()
         result = a.data
+
+        # Then
+        expect = np.cumsum(data)
+        # print(result, y)
+        self.assertTrue(np.all(expect[:-1] == result[1:]))
+
+    def test_scan_works_multiple_args_opencl(self):
+        importorskip('pyopencl')
+        # Given
+        a = np.arange(10000, dtype=np.int32)
+        out = np.arange(10000, dtype=np.int32)
+        data = a.copy()
+        a, out = wrap(a, out, backend='opencl')
+
+        @annotate(i='int', ary='intp', return_='int')
+        def input_f(i, ary):
+            return ary[i]
+
+        @annotate(int='i, prev_item', out='intp')
+        def output_f(i, out, prev_item):
+            out[i] = prev_item
+
+        # When
+        s = Scan(input_f, output_f, 'a+b', dtype=np.int32, backend='opencl')
+        s(ary=a, out=out)
+        out.pull()
+        result = out.data
 
         # Then
         expect = np.cumsum(data)
@@ -169,7 +196,7 @@ class TestParallelUtils(unittest.TestCase):
 
         # When
         s = Scan(input_f, output_f, 'a+b', dtype=np.int32, backend='cuda')
-        s(a)
+        s(ary=a)
         a.pull()
         result = a.data
 
