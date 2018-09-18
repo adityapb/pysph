@@ -25,6 +25,9 @@ from cpython.list cimport PyList_GetItem, PyList_SetItem, PyList_GET_ITEM
 cimport cython
 
 from pysph.cpy.config import get_config
+from pysph.cpy.array import Array
+from pysph.cpy.parallel import Elementwise
+from pysph.cpy.types import annotate
 
 
 IF OPENMP:
@@ -291,20 +294,28 @@ cdef class DomainManager:
     def update(self):
         self.manager.update()
 
+    cdef _remove_ghosts(self):
+        """Remove all ghost particles from a previous step
+
+        While creating periodic neighbors, we create new particles and
+        give them the tag utils.ParticleTAGS.Ghost. Before repeating
+        this step in the next iteration, all current particles with
+        this tag are removed.
+
+        """
+        cdef list pa_wrappers = self.manager.pa_wrappers
+        cdef int narrays = self.manager.narrays
+
+        cdef int array_index
+        cdef NNPSParticleArrayWrapper pa_wrapper
+
+        for array_index in range(narrays):
+            pa_wrapper = <NNPSParticleArrayWrapper> pa_wrappers[array_index]
+            pa_wrapper.remove_tagged_particles(Ghost)
+
 
 ##############################################################################
-cdef class CPUDomainManager:
-    """This class determines the limits of the solution domain.
-
-    We expect all simulations to have well defined domain limits
-    beyond which we are either not interested or the solution is
-    invalid to begin with. Thus, if a particle leaves the domain,
-    the solution should be considered invalid (at least locally).
-
-    The initial domain limits could be given explicitly or asked to be
-    computed from the particle arrays. The domain could be periodic.
-
-    """
+cdef class DomainManagerBase(object):
     def __init__(self, double xmin=-1000, double xmax=1000, double ymin=0,
                  double ymax=0, double zmin=0, double zmax=0,
                  periodic_in_x=False, periodic_in_y=False, periodic_in_z=False,
@@ -344,9 +355,6 @@ cdef class CPUDomainManager:
         # default DomainManager in_parallel is set to False
         self.in_parallel = False
 
-        self.dbl_max = np.finfo(float).max
-
-    #### Public protocol ################################################
     def set_pa_wrappers(self, wrappers):
         self.pa_wrappers = wrappers
         self.narrays = len(wrappers)
@@ -363,6 +371,65 @@ cdef class CPUDomainManager:
     def compute_cell_size_for_binning(self):
         self._compute_cell_size_for_binning()
 
+    def get_box_wrap_kernel(self):
+        ptr_type = 'gdoublep' if self.use_double else 'gfloatp'
+        val_type = 'double' if self.use_double else 'float'
+
+        types = {ptr_type : 'x, y, z',
+                 val_type : 'xtranslate, ytranslate, ztranslate',
+                 'int' : 'periodic_int_x, periodic_in_y, periodic_in_z'}
+
+        @annotate(**types)
+        def box_wrap(x, y, z, xtranslate, ytranslate, ztranslate,
+                     periodic_in_x, periodic_in_y, periodic_in_z):
+            if periodic_in_x:
+                if x[i] < xmin : x[i] = x[i] + xtranslate
+                if x[i] > xmax : x[i] = x[i] - xtranslate
+
+            if periodic_in_y:
+                if y[i] < ymin : y[i] = y[i] + ytranslate
+                if y[i] > ymax : y[i] = y[i] - ytranslate
+
+            if periodic_in_z:
+                if z[i] < zmin : z[i] = z[i] + ztranslate
+                if z[i] > zmax : z[i] = z[i] - ztranslate
+
+        return box_wrap
+
+
+##############################################################################
+cdef class CPUDomainManager(DomainManagerBase):
+    """This class determines the limits of the solution domain.
+
+    We expect all simulations to have well defined domain limits
+    beyond which we are either not interested or the solution is
+    invalid to begin with. Thus, if a particle leaves the domain,
+    the solution should be considered invalid (at least locally).
+
+    The initial domain limits could be given explicitly or asked to be
+    computed from the particle arrays. The domain could be periodic.
+
+    """
+    def __init__(self, double xmin=-1000, double xmax=1000, double ymin=0,
+                 double ymax=0, double zmin=0, double zmax=0,
+                 periodic_in_x=False, periodic_in_y=False, periodic_in_z=False,
+                 double n_layers=2.0):
+        """Constructor
+
+        The n_layers argument specifies the number of ghost layers as multiples
+        of hmax*radius_scale.
+
+        """
+        DomainManagerBase.__init__(xmin=xmin, xmax=xmax,
+                ymin=ymin, ymax=ymax, zmin=zmin, zmax=zmax,
+                periodic_in_x=periodic_in_x, periodic_in_y=periodic_in_y,
+                periodic_in_z=periodic_in_z, n_layers=n_layers)
+
+        self.use_double = True
+        self.dtype = float
+        self.dtype_max = np.finfo(self.dtype).max
+
+    #### Public protocol ################################################
     def update(self, *args, **kwargs):
         """General method that is called before NNPS can bin particles.
 
@@ -435,6 +502,8 @@ cdef class CPUDomainManager:
         for pa_wrapper in self.pa_wrappers:
             x = pa_wrapper.x; y = pa_wrapper.y; z = pa_wrapper.z
             np = x.length
+
+            box_wrap_knl = self.get_box_wrap_knl()
 
             # iterate over particles and box-wrap
             for i in range(np):
@@ -620,7 +689,7 @@ cdef class CPUDomainManager:
         cdef DoubleArray h
         cdef double cell_size
         cdef double _hmax, hmax = -1.0
-        cdef double _hmin, hmin = self.dbl_max
+        cdef double _hmin, hmin = self.dtype_max
 
         for pa_wrapper in pa_wrappers:
             h = pa_wrapper.h
@@ -643,25 +712,6 @@ cdef class CPUDomainManager:
 
         # set the cell size for the DomainManager
         self.set_cell_size(cell_size)
-
-    cdef _remove_ghosts(self):
-        """Remove all ghost particles from a previous step
-
-        While creating periodic neighbors, we create new particles and
-        give them the tag utils.ParticleTAGS.Ghost. Before repeating
-        this step in the next iteration, all current particles with
-        this tag are removed.
-
-        """
-        cdef list pa_wrappers = self.pa_wrappers
-        cdef int narrays = self.narrays
-
-        cdef int array_index
-        cdef NNPSParticleArrayWrapper pa_wrapper
-
-        for array_index in range( narrays ):
-            pa_wrapper = <NNPSParticleArrayWrapper>PyList_GetItem( pa_wrappers, array_index )
-            pa_wrapper.remove_tagged_particles(Ghost)
 
     def _update_gpu(self):
         # FIXME: this is just done for correctness.  We should really
