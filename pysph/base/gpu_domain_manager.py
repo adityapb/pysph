@@ -5,9 +5,10 @@ import pyopencl.array
 from pysph.base.nnps_base import DomainManagerBase
 from pysph.base.opencl import get_config
 
-from pysph.cpy.array import Array
+from pysph.cpy.array import Array, get_backend
 from pysph.cpy.parallel import Elementwise
-from pysph.cpy.types import annotate
+from pysph.cpy.types import annotate, dtype_to_ctype
+from pysph.cpy
 
 
 class GPUDomainManager(DomainManagerBase):
@@ -25,6 +26,7 @@ class GPUDomainManager(DomainManagerBase):
         self.dtype = np.float64 if use_double else np.float32
 
         self.dtype_max = np.finfo(self.dtype).max
+        self.backend = get_backend()
 
     def update(self, *args, **kwargs):
         """General method that is called before NNPS can bin particles.
@@ -91,9 +93,35 @@ class GPUDomainManager(DomainManagerBase):
         # set the cell size for the DomainManager
         self.set_cell_size(cell_size)
 
+    def _get_box_wrap_kernel(self):
+        val_type = dtype_to_ctype(self.dtype)
+        ptr_type = 'g%sp' % val_type
+
+        types = {ptr_type : 'x, y, z',
+                 val_type : 'xtranslate, ytranslate, ztranslate',
+                 'int' : 'periodic_int_x, periodic_in_y, periodic_in_z'}
+
+        @annotate(**types)
+        def box_wrap(x, y, z, xtranslate, ytranslate, ztranslate,
+                     periodic_in_x, periodic_in_y, periodic_in_z):
+            if periodic_in_x:
+                if x[i] < xmin : x[i] = x[i] + xtranslate
+                if x[i] > xmax : x[i] = x[i] - xtranslate
+
+            if periodic_in_y:
+                if y[i] < ymin : y[i] = y[i] + ytranslate
+                if y[i] > ymax : y[i] = y[i] - ytranslate
+
+            if periodic_in_z:
+                if z[i] < zmin : z[i] = z[i] + ztranslate
+                if z[i] > zmax : z[i] = z[i] - ztranslate
+
+        return Elementwise(box_wrap, backend=self.backend)
+
+
     ###########################CHANGE FROM HERE####################################
 
-    cdef _box_wrap_periodic(self):
+    def _box_wrap_periodic(self):
         """Box-wrap particles for periodicity
 
         The periodic domain is a rectangular box defined by minimum
@@ -105,52 +133,39 @@ class GPUDomainManager(DomainManagerBase):
 
         """
         # minimum and maximum values of the domain
-        cdef double xmin = self.xmin, xmax = self.xmax
-        cdef double ymin = self.ymin, ymax = self.ymax,
-        cdef double zmin = self.zmin, zmax = self.zmax
+        xmin = self.xmin, xmax = self.xmax
+        ymin = self.ymin, ymax = self.ymax,
+        zmin = self.zmin, zmax = self.zmax
 
         # translations along each coordinate direction
-        cdef double xtranslate = self.xtranslate
-        cdef double ytranslate = self.ytranslate
-        cdef double ztranslate = self.ztranslate
+        xtranslate = self.xtranslate
+        ytranslate = self.ytranslate
+        ztranslate = self.ztranslate
 
         # periodicity flags for NNPS
-        cdef bint periodic_in_x = self.periodic_in_x
-        cdef bint periodic_in_y = self.periodic_in_y
-        cdef bint periodic_in_z = self.periodic_in_z
-
-        # locals
-        cdef NNPSParticleArrayWrapper pa_wrapper
-        cdef DoubleArray x, y, z
-        cdef double xi, yi, zi
-        cdef int i, np
+        periodic_in_x = self.periodic_in_x
+        periodic_in_y = self.periodic_in_y
+        periodic_in_z = self.periodic_in_z
 
         # iterate over each array and mark for translation
         for pa_wrapper in self.pa_wrappers:
-            x = pa_wrapper.x; y = pa_wrapper.y; z = pa_wrapper.z
-            np = x.length
+            x = Array(); y = Array(); z = Array()
 
-            # iterate over particles and box-wrap
-            for i in range(np):
+            x.set_dev_array(pa_wrapper.gpu.x)
+            y.set_dev_array(pa_wrapper.gpu.y)
+            z.set_dev_array(pa_wrapper.gpu.z)
 
-                if periodic_in_x:
-                    if x.data[i] < xmin : x.data[i] = x.data[i] + xtranslate
-                    if x.data[i] > xmax : x.data[i] = x.data[i] - xtranslate
+            box_wrap_knl = self._get_box_wrap_kernel()
 
-                if periodic_in_y:
-                    if y.data[i] < ymin : y.data[i] = y.data[i] + ytranslate
-                    if y.data[i] > ymax : y.data[i] = y.data[i] - ytranslate
-
-                if periodic_in_z:
-                    if z.data[i] < zmin : z.data[i] = z.data[i] + ztranslate
-                    if z.data[i] > zmax : z.data[i] = z.data[i] - ztranslate
+            box_wrap_knl(x, y, z, xtranslate, ytranslate, ztranslate,
+                         periodic_in_x, periodic_in_y, periodic_in_z)
 
     def _check_limits(self, xmin, xmax, ymin, ymax, zmin, zmax):
         """Sanity check on the limits"""
         if ( (xmax < xmin) or (ymax < ymin) or (zmax < zmin) ):
             raise ValueError("Invalid domain limits!")
 
-    cdef _create_ghosts_periodic(self):
+    def _create_ghosts_periodic(self):
         """Identify boundary particles and create images.
 
         We need to find all particles that are within a specified
@@ -161,37 +176,37 @@ class GPUDomainManager(DomainManagerBase):
         The periodic domain is specified using the DomainManager object
 
         """
-        cdef list pa_wrappers = self.pa_wrappers
-        cdef int narrays = self.narrays
+        pa_wrappers = self.pa_wrappers
+        narrays = self.narrays
 
         # cell size used to check for periodic ghosts. For summation density
         # like operations, we need to create two layers of ghost images, this
         # is configurable via the n_layers argument to the constructor.
-        cdef double cell_size = self.n_layers * self.cell_size
+        cell_size = self.n_layers * self.cell_size
 
         # periodic domain values
-        cdef double xmin = self.xmin, xmax = self.xmax
-        cdef double ymin = self.ymin, ymax = self.ymax,
-        cdef double zmin = self.zmin, zmax = self.zmax
+        xmin = self.xmin, xmax = self.xmax
+        ymin = self.ymin, ymax = self.ymax,
+        zmin = self.zmin, zmax = self.zmax
 
-        cdef double xtranslate = self.xtranslate
-        cdef double ytranslate = self.ytranslate
-        cdef double ztranslate = self.ztranslate
+        xtranslate = self.xtranslate
+        ytranslate = self.ytranslate
+        ztranslate = self.ztranslate
 
         # periodicity flags
-        cdef bint periodic_in_x = self.periodic_in_x
-        cdef bint periodic_in_y = self.periodic_in_y
-        cdef bint periodic_in_z = self.periodic_in_z
+        periodic_in_x = self.periodic_in_x
+        periodic_in_y = self.periodic_in_y
+        periodic_in_z = self.periodic_in_z
 
         # locals
-        cdef NNPSParticleArrayWrapper pa_wrapper
-        cdef ParticleArray pa, added
-        cdef DoubleArray x, y, z, xt, yt, zt
-        cdef double xi, yi, zi
-        cdef int array_index, i, np
+        #cdef NNPSParticleArrayWrapper pa_wrapper
+        #cdef ParticleArray pa, added
+        #cdef DoubleArray x, y, z, xt, yt, zt
+        #cdef double xi, yi, zi
+        #cdef int array_index, i, np
 
         # temporary indices for particles to be replicated
-        cdef LongArray x_low, x_high, y_high, y_low, z_high, z_low, low, high
+        #cdef LongArray x_low, x_high, y_high, y_low, z_high, z_low, low, high
 
         x_low = LongArray(); x_high = LongArray()
         y_high = LongArray(); y_low = LongArray()

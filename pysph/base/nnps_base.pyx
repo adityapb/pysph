@@ -371,31 +371,6 @@ cdef class DomainManagerBase(object):
     def compute_cell_size_for_binning(self):
         self._compute_cell_size_for_binning()
 
-    def get_box_wrap_kernel(self):
-        ptr_type = 'gdoublep' if self.use_double else 'gfloatp'
-        val_type = 'double' if self.use_double else 'float'
-
-        types = {ptr_type : 'x, y, z',
-                 val_type : 'xtranslate, ytranslate, ztranslate',
-                 'int' : 'periodic_int_x, periodic_in_y, periodic_in_z'}
-
-        @annotate(**types)
-        def box_wrap(x, y, z, xtranslate, ytranslate, ztranslate,
-                     periodic_in_x, periodic_in_y, periodic_in_z):
-            if periodic_in_x:
-                if x[i] < xmin : x[i] = x[i] + xtranslate
-                if x[i] > xmax : x[i] = x[i] - xtranslate
-
-            if periodic_in_y:
-                if y[i] < ymin : y[i] = y[i] + ytranslate
-                if y[i] > ymax : y[i] = y[i] - ytranslate
-
-            if periodic_in_z:
-                if z[i] < zmin : z[i] = z[i] + ztranslate
-                if z[i] > zmax : z[i] = z[i] - ztranslate
-
-        return box_wrap
-
 
 ##############################################################################
 cdef class CPUDomainManager(DomainManagerBase):
@@ -502,8 +477,6 @@ cdef class CPUDomainManager(DomainManagerBase):
         for pa_wrapper in self.pa_wrappers:
             x = pa_wrapper.x; y = pa_wrapper.y; z = pa_wrapper.z
             np = x.length
-
-            box_wrap_knl = self.get_box_wrap_knl()
 
             # iterate over particles and box-wrap
             for i in range(np):
