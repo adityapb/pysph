@@ -144,6 +144,8 @@ class CConverter(ast.NodeVisitor):
             True: '1', False: '0', None: 'NULL',
         }
         self.function_address_space = ''
+        self.local_arg = None
+        self.local_arg_type = None
 
     def _body_has_return(self, body):
         return re.search(r'\breturn\b', body) is not None
@@ -231,6 +233,7 @@ class CConverter(ast.NodeVisitor):
         code = ast.parse(src)
         result = self.visit(code)
         self._ignore_methods = []
+        self.local_arg = False
         return result
 
     def error(self, message, node):
@@ -255,10 +258,10 @@ class CConverter(ast.NodeVisitor):
         helper = CStructHelper(obj)
         return helper.get_code() + '\n'
 
-    def parse(self, obj):
+    def parse(self, obj, local_def=False):
         obj_type = type(obj)
         if isinstance(obj, types.FunctionType):
-            return self.parse_function(obj)
+            return self.parse_function(obj, local_def=local_def)
         elif hasattr(obj, '__class__'):
             return self.parse_instance(obj)
         else:
@@ -276,13 +279,37 @@ class CConverter(ast.NodeVisitor):
         self._annotations = {}
         return code
 
-    def parse_function(self, obj):
+    def parse_function(self, obj, local_def=False):
         src = dedent(inspect.getsource(obj))
         fname = obj.__name__
         self._annotations[fname] = getattr(obj, '__annotations__', None)
+        if local_def:
+            self.local_arg, self.local_arg_type = \
+                    self._get_local_arg(self._annotations[fname])
+        else:
+            self.local_arg, self.local_arg_type = None, None
         code = self.convert(src)
+        self.local_arg = None
+        self.local_arg_type = None
         self._annotations = {}
         return code
+
+    def _get_local_arg(self, annotations):
+        has_local_arg = False
+        local_arg = None
+        local_arg_type = None
+        for arg, arg_type in annotations.iteritems():
+            if arg_type.startswith('l') and arg_type.endswith('p'):
+                if not has_local_arg:
+                    local_arg = arg
+                    local_arg_type = arg_type[1:-1]
+                    if local_arg_type.startswith('u'):
+                        local_arg_type = 'unsigned %s' % local_arg_type[1:]
+                    has_local_arg = True
+                else:
+                    raise NotImplementedError('CUDA backend only supports \
+                            single shared array as argument')
+        return local_arg, local_arg_type
 
     def visit_Add(self, node):
         return '+'
@@ -549,7 +576,11 @@ class CConverter(ast.NodeVisitor):
         ))
         self._known = orig_known
         self._declares = orig_declares
-        return sig + '\n{\n' + declares + body + '\n}\n'
+        local_decl = ''
+        if self.local_arg:
+            local_decl = 'extern LOCAL_MEM %(dtype)s %(name)s[];\n' % \
+                    {'dtype' : self.local_arg_type, 'name' : self.local_arg}
+        return sig + '\n{\n' local_decl + declares + body + '\n}\n'
 
     def visit_Gt(self, node):
         return '>'

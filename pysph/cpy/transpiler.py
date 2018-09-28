@@ -252,8 +252,10 @@ class Transpiler(object):
         if self.backend == 'cython':
             self._cgen.parse(obj)
             code = self._cgen.get_code()
-        elif self.backend == 'opencl' or self.backend == 'cuda':
+        elif self.backend == 'opencl':
             code = self._cgen.parse(obj)
+        elif self.backend == 'cuda':
+            code = self._cgen.parse(obj, local_def=True)
 
         cb = CodeBlock(obj, code)
         self.blocks.append(cb)

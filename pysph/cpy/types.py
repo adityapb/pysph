@@ -143,18 +143,6 @@ TYPES = dict(
 )
 
 
-def _inject_types_in_module():
-    g = globals()
-    for name, type in TYPES.items():
-        if name in ['int', 'long', 'float']:
-            name = name + '_'
-        g[name] = type
-
-
-# A convenience so users can import types directly from the module.
-_inject_types_in_module()
-
-
 NP_C_TYPE_MAP = {
     np.dtype(np.bool): 'char',
     np.dtype(np.float32): 'float', np.dtype(np.float64): 'double',
@@ -177,6 +165,29 @@ C_NP_TYPE_MAP = {
     'unsigned long': np.uint64,
     'unsigned short': np.uint16
 }
+
+
+def _update_types_with_vector_types():
+    for ctype in C_NP_TYPE_MAP.keys():
+        if 'unsigned' in ctype:
+            ctype = 'u%s' % ctype.replace('unsigned ', '')
+        for i in range(1, 5):
+            knowntype = '%s%i' % (ctype, i)
+            TYPES[knowntype] = KnownType(knowntype)
+
+
+def _inject_types_in_module():
+    g = globals()
+    for name, type in TYPES.items():
+        if name in ['int', 'long', 'float']:
+            name = name + '_'
+        g[name] = type
+
+
+_update_types_with_vector_types()
+
+# A convenience so users can import types directly from the module.
+_inject_types_in_module()
 
 
 def dtype_to_ctype(dtype):
