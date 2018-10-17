@@ -555,11 +555,8 @@ class CConverter(ast.NodeVisitor):
                                                'prev_arg': prev_arg}
                     decls.append(local_decl)
                     prev_arg = arg
-            local_decl = '\n'.join(decls)
-            #local_decl = '\n'.join(wrap(
-            #    decls, width=78, subsequent_indent=' '*4, break_long_words=False
-            #))
-
+            local_decl = self._indent_block('\n'.join(decls))
+            local_decl += '\n'
 
         if len(self._class_name) > 0:
             func_name = self._class_name + '_' + node.name
