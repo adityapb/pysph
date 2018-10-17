@@ -218,7 +218,7 @@ class CConverter(ast.NodeVisitor):
 
     def _indent_block(self, code):
         lines = code.splitlines()
-        pad = ' '*4
+        pad = ' ' * 4
         return '\n'.join(pad + x for x in lines)
 
     def _remove_docstring(self, body):
@@ -243,7 +243,7 @@ class CConverter(ast.NodeVisitor):
             if node.lineno > 1:  # pragma no branch
                 msg += self._src[node.lineno - 2] + '\n'
             msg += self._src[node.lineno - 1] + '\n'
-            msg += ' '*node.col_offset + '^' + '\n\n'
+            msg += ' ' * node.col_offset + '^' + '\n\n'
         msg += message
         raise NotImplementedError(msg)
 
@@ -453,7 +453,7 @@ class CConverter(ast.NodeVisitor):
                      block='\n'.join(
                          self._indent_block(self.visit(x)) for x in node.body
                      )
-                 )
+            )
         else:
             count = self._for_count
             self._for_count += 1
@@ -478,7 +478,7 @@ class CConverter(ast.NodeVisitor):
                           i=target, type=target_type,
                           start=start, stop=stop, incr=incr,
                           comp=comparator, block=block
-                      )
+                )
             else:
                 step_var = '__cpy_step_{count}'.format(count=count)
                 type = 'long ' if step_var not in self._known else ''
@@ -544,13 +544,14 @@ class CConverter(ast.NodeVisitor):
             decls = ['extern LOCAL_MEM float shared_buff[];']
             for arg, dtype in self._local_decl.items():
                 if len(decls) == 1:
-                    local_decl = '%(dtype)s* %(arg)s = (%(dtype)s*) shared_buff;'
+                    local_decl = ('%(dtype)s* %(arg)s = '
+                                  '(%(dtype)s*) shared_buff;')
                     local_decl = local_decl % {'dtype': dtype, 'arg': arg}
                     decls.append(local_decl)
                     prev_arg = arg
                 else:
-                    local_decl = ('%(dtype)s* %(arg)s = '
-                                  '(%(dtype)s*) &%(prev_arg)s[size_%(prev_arg)s];')
+                    local_decl = ('%(dtype)s* %(arg)s = (%(dtype)s*) '
+                                  '&%(prev_arg)s[size_%(prev_arg)s];')
                     local_decl = local_decl % {'dtype': dtype, 'arg': arg,
                                                'prev_arg': prev_arg}
                     decls.append(local_decl)
@@ -572,7 +573,7 @@ class CConverter(ast.NodeVisitor):
             declares += '\n'
 
         sig = '\n'.join(wrap(
-            sig, width=78, subsequent_indent=' '*4, break_long_words=False
+            sig, width=78, subsequent_indent=' ' * 4, break_long_words=False
         ))
         self._known = orig_known
         self._declares = orig_declares
