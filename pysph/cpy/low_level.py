@@ -66,7 +66,7 @@ class LocalMem(object):
         elif self.backend == 'opencl':
             import pyopencl as cl
             dtype = ctype_to_dtype(c_type)
-            sz = dtype().itemsize
+            sz = dtype.itemsize
             mem = cl.LocalMemory(sz * self.size * workgroup_size)
             self._cache[key] = mem
             return mem
@@ -133,7 +133,9 @@ class Kernel(object):
         elif backend == 'opencl':
             from .opencl import get_queue
             self.queue = get_queue()
-
+        elif backend == 'cuda':
+            from .cuda import set_context
+            set_context()
         self.tp = Transpiler(backend=backend)
         self.backend = backend
         self.name = func.__name__
@@ -155,21 +157,35 @@ class Kernel(object):
         )
 
         arg_info = []
+        local_info = {}
         for arg in argspec.args:
             kt = annotations[arg]
             if not self._use_double:
                 kt = KnownType(
                     self._to_float(kt.type), self._to_float(kt.base_type)
                 )
+            if 'LOCAL_MEM' in kt.type:
+                local_info[arg] = kt.base_type
             arg_info.append((arg, kt))
         func_info = {
             'args': arg_info,
+            'local_info': local_info,
             'return': annotations.get('return', KnownType('void'))
         }
         return func_info
 
+    def _get_local_size(self, args, workgroup_size):
+        local_info = self._func_info['local_info']
+        arg_info = self._func_info['args']
+        total_size = 0
+        for arg, a_info in zip(args, arg_info):
+            if isinstance(arg, LocalMem):
+                dtype = ctype_to_dtype(local_info[a_info[0]])
+                total_size += dtype.itemsize
+        return workgroup_size * total_size
+
     def _generate(self):
-        self.tp.add(self.func)
+        self.tp.add(self.func, local_decl=self._func_info['local_info'])
         self._correct_opencl_address_space()
 
         self.tp.compile()
@@ -198,7 +214,10 @@ class Kernel(object):
             elif self.backend == 'cuda':
                 return x.dev
         elif isinstance(x, LocalMem):
-            return x.get(type_info.base_type, workgroup_size)
+            if self.backend == 'opencl':
+                return x.get(type_info.base_type, workgroup_size)
+            elif self.backend == 'cuda':
+                return np.array(workgroup_size, dtype=np.int32)
         else:
             dtype = ctype_to_dtype(type_info.type)
             return np.array([x], dtype=dtype)
@@ -230,6 +249,8 @@ class Kernel(object):
             gs = (global_size, )
         else:
             gs, ls = self._get_workgroup_size(n)
+        if self.backend == 'cuda':
+            shared_mem_sz = self._get_local_size(args, ls[0])
         c_args = self._get_args(args, ls[0])
         if self.backend == 'opencl':
             prepend = [self.queue, gs, ls]
@@ -239,7 +260,8 @@ class Kernel(object):
         elif self.backend == 'cuda':
             num_blocks = int((n + ls[0] - 1) / ls[0])
             num_tpb = ls[0]
-            self.knl(*c_args, block=(num_tpb, 1, 1), grid=(num_blocks, 1))
+            self.knl(*c_args, block=(num_tpb, 1, 1), grid=(num_blocks, 1),
+                     shared=shared_mem_sz)
 
 
 class _prange(Extern):

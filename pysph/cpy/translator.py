@@ -144,6 +144,7 @@ class CConverter(ast.NodeVisitor):
             True: '1', False: '0', None: 'NULL',
         }
         self.function_address_space = ''
+        self._local_decl = None
 
     def _body_has_return(self, body):
         return re.search(r'\breturn\b', body) is not None
@@ -190,6 +191,9 @@ class CConverter(ast.NodeVisitor):
         for arg in args:
             value = call_args[arg]
             type = self._detect_type(arg, value)
+            if self._local_decl and 'LOCAL_MEM' in type:
+                type = 'int'
+                arg = 'size_%s' % arg
             call_sig.append('{type} {arg}'.format(type=type, arg=arg))
 
         return ', '.join(call_sig)
@@ -255,14 +259,17 @@ class CConverter(ast.NodeVisitor):
         helper = CStructHelper(obj)
         return helper.get_code() + '\n'
 
-    def parse(self, obj):
+    def parse(self, obj, local_decl=None):
+        self._local_decl = local_decl
         obj_type = type(obj)
         if isinstance(obj, types.FunctionType):
-            return self.parse_function(obj)
+            code = self.parse_function(obj)
         elif hasattr(obj, '__class__'):
-            return self.parse_instance(obj)
+            code = self.parse_instance(obj)
         else:
             raise TypeError('Unsupported type to wrap: %s' % obj_type)
+        self._local_decl = None
+        return code
 
     def parse_instance(self, obj, ignore_methods=None):
         code = self.get_struct_from_instance(obj)
@@ -532,6 +539,28 @@ class CConverter(ast.NodeVisitor):
         args = self._get_function_args(node)
         body = '\n'.join(self._indent_block(self.visit(item))
                          for item in self._remove_docstring(node.body))
+        local_decl = ''
+        if self._local_decl:
+            decls = ['extern LOCAL_MEM float shared_buff[];']
+            for arg, dtype in self._local_decl.items():
+                if len(decls) == 1:
+                    local_decl = '%(dtype)s* %(arg)s = (%(dtype)s*) shared_buff;'
+                    local_decl = local_decl % {'dtype': dtype, 'arg': arg}
+                    decls.append(local_decl)
+                    prev_arg = arg
+                else:
+                    local_decl = ('%(dtype)s* %(arg)s = '
+                                  '(%(dtype)s*) &%(prev_arg)s[size_%(prev_arg)s];')
+                    local_decl = local_decl % {'dtype': dtype, 'arg': arg,
+                                               'prev_arg': prev_arg}
+                    decls.append(local_decl)
+                    prev_arg = arg
+            local_decl = '\n'.join(decls)
+            #local_decl = '\n'.join(wrap(
+            #    decls, width=78, subsequent_indent=' '*4, break_long_words=False
+            #))
+
+
         if len(self._class_name) > 0:
             func_name = self._class_name + '_' + node.name
         else:
@@ -550,7 +579,7 @@ class CConverter(ast.NodeVisitor):
         ))
         self._known = orig_known
         self._declares = orig_declares
-        return sig + '\n{\n' + declares + body + '\n}\n'
+        return sig + '\n{\n' + local_decl + declares + body + '\n}\n'
 
     def visit_Gt(self, node):
         return '>'
