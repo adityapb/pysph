@@ -144,7 +144,6 @@ class CConverter(ast.NodeVisitor):
             True: '1', False: '0', None: 'NULL',
         }
         self.function_address_space = ''
-        self._local_decl = None
 
     def _body_has_return(self, body):
         return re.search(r'\breturn\b', body) is not None
@@ -191,9 +190,6 @@ class CConverter(ast.NodeVisitor):
         for arg in args:
             value = call_args[arg]
             type = self._detect_type(arg, value)
-            if self._local_decl and 'LOCAL_MEM' in type:
-                type = 'int'
-                arg = 'size_%s' % arg
             call_sig.append('{type} {arg}'.format(type=type, arg=arg))
 
         return ', '.join(call_sig)
@@ -259,8 +255,7 @@ class CConverter(ast.NodeVisitor):
         helper = CStructHelper(obj)
         return helper.get_code() + '\n'
 
-    def parse(self, obj, local_decl=None):
-        self._local_decl = local_decl
+    def parse(self, obj):
         obj_type = type(obj)
         if isinstance(obj, types.FunctionType):
             code = self.parse_function(obj)
@@ -268,7 +263,6 @@ class CConverter(ast.NodeVisitor):
             code = self.parse_instance(obj)
         else:
             raise TypeError('Unsupported type to wrap: %s' % obj_type)
-        self._local_decl = None
         return code
 
     def parse_instance(self, obj, ignore_methods=None):
@@ -539,26 +533,6 @@ class CConverter(ast.NodeVisitor):
         args = self._get_function_args(node)
         body = '\n'.join(self._indent_block(self.visit(item))
                          for item in self._remove_docstring(node.body))
-        local_decl = ''
-        if self._local_decl:
-            decls = ['extern LOCAL_MEM float shared_buff[];']
-            for arg, dtype in self._local_decl.items():
-                if len(decls) == 1:
-                    local_decl = ('%(dtype)s* %(arg)s = '
-                                  '(%(dtype)s*) shared_buff;')
-                    local_decl = local_decl % {'dtype': dtype, 'arg': arg}
-                    decls.append(local_decl)
-                    prev_arg = arg
-                else:
-                    local_decl = ('%(dtype)s* %(arg)s = (%(dtype)s*) '
-                                  '&%(prev_arg)s[size_%(prev_arg)s];')
-                    local_decl = local_decl % {'dtype': dtype, 'arg': arg,
-                                               'prev_arg': prev_arg}
-                    decls.append(local_decl)
-                    prev_arg = arg
-            local_decl = self._indent_block('\n'.join(decls))
-            local_decl += '\n'
-
         if len(self._class_name) > 0:
             func_name = self._class_name + '_' + node.name
         else:
@@ -577,7 +551,7 @@ class CConverter(ast.NodeVisitor):
         ))
         self._known = orig_known
         self._declares = orig_declares
-        return sig + '\n{\n' + local_decl + declares + body + '\n}\n'
+        return sig + '\n{\n' + declares + body + '\n}\n'
 
     def visit_Gt(self, node):
         return '>'
@@ -720,3 +694,141 @@ class OpenCLConverter(CConverter):
 
     def _get_self_type(self):
         return KnownType('GLOBAL_MEM %s*' % self._class_name)
+
+
+class CUDAConverter(CConverter):
+    def __init__(self, detect_type=ocl_detect_type, known_types=None):
+        super(CUDAConverter, self).__init__(detect_type, known_types)
+        self.function_address_space = 'WITHIN_KERNEL '
+        self._known.update((
+            'LID_0', 'LID_1', 'LID_2',
+            'GID_0', 'GID_1', 'GID_2',
+            'LDIM_0', 'LDIM_1', 'LDIM_2',
+            'GDIM_0', 'GDIM_1', 'GDIM_2'
+        ))
+        self._local_decl = None
+
+    def _get_self_type(self):
+        return KnownType('GLOBAL_MEM %s*' % self._class_name)
+
+    def _get_function_args(self, node):
+        node_args = node.args.args
+        if PY_VER == 2:
+            args = [x.id for x in node_args]
+        else:
+            args = [x.arg for x in node_args]
+        annotations = self._annotations.get(node.name)
+        call_args = {}
+        if annotations:
+            for arg in args:
+                call_args[arg] = annotations.get(arg, Undefined)
+        else:
+            defaults = [ast.literal_eval(x) for x in node.args.defaults]
+
+            # Fill up the call_args dict with the defaults.
+            for i in range(1, len(defaults) + 1):
+                call_args[args[-i]] = defaults[-i]
+
+            # Set the rest to Undefined.
+            for i in range(len(args) - len(defaults)):
+                call_args[args[i]] = Undefined
+
+            call_args.update(self._known_types)
+
+        if len(self._class_name) > 0:
+            call_args['self'] = self._get_self_type()
+
+        call_sig = []
+        for arg in args:
+            value = call_args[arg]
+            type = self._detect_type(arg, value)
+            if self._local_decl and 'LOCAL_MEM' in type:
+                type = 'int'
+                arg = 'size_%s' % arg
+            call_sig.append('{type} {arg}'.format(type=type, arg=arg))
+
+        return ', '.join(call_sig)
+
+    def _get_local_info(self, obj):
+        fname = obj.__name__
+        annotations = self._annotations[fname]
+        local_info = {}
+        for arg, kt in annotations.items():
+            if 'LOCAL_MEM' in kt.type:
+                local_info[arg] = kt.base_type
+        if local_info:
+            return local_info
+        return None
+
+    def parse_function(self, obj):
+        src = dedent(inspect.getsource(obj))
+        fname = obj.__name__
+        self._annotations[fname] = getattr(obj, '__annotations__', None)
+        self._local_decl = self._get_local_info(obj)
+        code = self.convert(src)
+        self._local_decl = None
+        self._annotations = {}
+        return code
+
+    def visit_FunctionDef(self, node):
+        assert node.args.vararg is None, \
+            "Functions with varargs nor supported in line %d." % node.lineno
+        assert node.args.kwarg is None, \
+            "Functions with kwargs not supported in line %d." % node.lineno
+
+        if self._class_name and (node.name.startswith(('_', 'py_')) or
+                                 node.name in self._ignore_methods):
+            return ''
+
+        orig_declares = self._declares
+        self._declares = {}
+        orig_known = set(self._known)
+        if PY_VER == 2:
+            self._known.update(x.id for x in node.args.args)
+        else:
+            self._known.update(x.arg for x in node.args.args)
+
+        args = self._get_function_args(node)
+        body = '\n'.join(self._indent_block(self.visit(item))
+                         for item in self._remove_docstring(node.body))
+        local_decl = ''
+        if self._local_decl:
+            decls = ['extern LOCAL_MEM float shared_buff[];']
+            # Reference:
+            # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#shared
+            for arg, dtype in self._local_decl.items():
+                if len(decls) == 1:
+                    local_decl = ('%(dtype)s* %(arg)s = '
+                                  '(%(dtype)s*) shared_buff;')
+                    local_decl = local_decl % {'dtype': dtype, 'arg': arg}
+                    decls.append(local_decl)
+                    prev_arg = arg
+                else:
+                    local_decl = ('%(dtype)s* %(arg)s = (%(dtype)s*) '
+                                  '&%(prev_arg)s[size_%(prev_arg)s];')
+                    local_decl = local_decl % {'dtype': dtype, 'arg': arg,
+                                               'prev_arg': prev_arg}
+                    decls.append(local_decl)
+                    prev_arg = arg
+            local_decl = self._indent_block('\n'.join(decls))
+            local_decl += '\n'
+
+        if len(self._class_name) > 0:
+            func_name = self._class_name + '_' + node.name
+        else:
+            func_name = node.name
+        return_type = self._get_return_type(body, node)
+        sig = self.function_address_space + '{ret} {name}({args})'.format(
+            ret=return_type, name=func_name, args=args
+        )
+
+        declares = self._indent_block(self.get_declarations())
+        if len(declares) > 0:
+            declares += '\n'
+
+        sig = '\n'.join(wrap(
+            sig, width=78, subsequent_indent=' ' * 4, break_long_words=False
+        ))
+        self._known = orig_known
+        self._declares = orig_declares
+        return sig + '\n{\n' + local_decl + declares + body + '\n}\n'

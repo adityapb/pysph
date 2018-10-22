@@ -9,7 +9,7 @@ from mako.template import Template
 from .config import get_config
 from .ast_utils import get_unknown_names_and_calls
 from .cython_generator import CythonGenerator, CodeGenerationError
-from .translator import OpenCLConverter
+from .translator import OpenCLConverter, CUDAConverter
 from .ext_module import ExtModule
 from .extern import Extern, get_extern_code
 
@@ -166,7 +166,7 @@ class Transpiler(object):
             ''')
         elif backend == 'cuda':
             from pycuda._cluda import CLUDA_PREAMBLE
-            self._cgen = OpenCLConverter()
+            self._cgen = CUDAConverter()
             cluda = ''
             if incl_cluda:
                 cluda = Template(text=CLUDA_PREAMBLE).render(
@@ -250,7 +250,7 @@ class Transpiler(object):
         for f in calls:
             self.add(f)
 
-    def add(self, obj, local_decl=None):
+    def add(self, obj):
         if obj in self.blocks:
             return
 
@@ -259,10 +259,8 @@ class Transpiler(object):
         if self.backend == 'cython':
             self._cgen.parse(obj)
             code = self._cgen.get_code()
-        elif self.backend == 'opencl':
+        elif self.backend == 'opencl' or self.backend == 'cuda':
             code = self._cgen.parse(obj)
-        elif self.backend == 'cuda':
-            code = self._cgen.parse(obj, local_decl=local_decl)
 
         cb = CodeBlock(obj, code)
         self.blocks.append(cb)

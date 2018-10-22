@@ -39,6 +39,7 @@ class LocalMem(object):
 
     Note that this is basically ``sizeof(double) * 128 * 2``
     '''
+
     def __init__(self, size, backend=None):
         '''
         Constructor
@@ -104,7 +105,7 @@ def splay_cl(queue, n, kernel_specific_max_wg_size=None):
         group_count = (n + max_work_items - 1) // max_work_items
         work_items_per_group = max_work_items
 
-    return (group_count*work_items_per_group,), (work_items_per_group,)
+    return (group_count * work_items_per_group,), (work_items_per_group,)
 
 
 class Kernel(object):
@@ -124,6 +125,7 @@ class Kernel(object):
     type checking of the passed constants.
 
     """
+
     def __init__(self, func, backend='opencl'):
         backend = get_backend(backend)
         if backend == 'cython':
@@ -185,7 +187,7 @@ class Kernel(object):
         return workgroup_size * total_size
 
     def _generate(self):
-        self.tp.add(self.func, local_decl=self._func_info['local_info'])
+        self.tp.add(self.func)
         self._correct_opencl_address_space()
 
         self.tp.compile()
