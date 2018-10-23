@@ -757,5 +757,3 @@ class CUDAConverter(OpenCLConverter):
             local_decl = self._indent_block('\n'.join(decls))
             local_decl += '\n'
         return local_decl
-
-
