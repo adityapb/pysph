@@ -19,7 +19,7 @@ install:
     - bash miniconda.sh -b -p $HOME/miniconda
     - export PATH="$HOME/miniconda/bin:$PATH"
     - hash -r
-    - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+    - if [[ "$TRAVIS_PYTHON_VERSION" == "3.6" ]]; then
         conda install -y python=3.6;
       fi
     - conda config --set always_yes yes --set changeps1 no
