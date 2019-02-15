@@ -7,7 +7,7 @@ dist:
 language: python
 python:
     - 2.7
-    - 3.6
+    - 3.7
 
 install:
     - sudo apt-get update 
@@ -19,9 +19,6 @@ install:
     - bash miniconda.sh -b -p $HOME/miniconda
     - export PATH="$HOME/miniconda/bin:$PATH"
     - hash -r
-    - if [[ "$TRAVIS_PYTHON_VERSION" == "3.6" ]]; then
-        conda install -y python=3.6;
-      fi
     - conda config --set always_yes yes --set changeps1 no
     - conda update -q conda
     - conda info -a
@@ -31,6 +28,8 @@ install:
     - conda install -c defaults virtualenv
     - python -c 'import pyopencl as cl'
     - pip install beaker tox tox-travis
+    - pip install -r requirements.txt
+    - pip install -r requirements-test.txt
 
 script:
-    - tox
+    - pytest -v
