@@ -11,6 +11,8 @@ python:
 
 before_install:
     - sudo apt-get update 
+    - sudo apt-get install build-essential checkinstall
+    - sudo apt-get install libc6-dev libreadline-gplv2-dev libncursesw5-dev libssl-dev libsqlite3-dev tk-dev libgdbm-dev libbz2-dev
     - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
         wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
       else
