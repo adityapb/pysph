@@ -7,9 +7,9 @@ dist:
 language: python
 python:
     - 2.7
-    - 3.7
+    - 3.6
 
-install:
+before_install:
     - sudo apt-get update 
     - if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
         wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
@@ -22,15 +22,15 @@ install:
     - conda config --set always_yes yes --set changeps1 no
     - conda update -q conda
     - conda info -a
+
+install:
+    - conda create --yes -n pysph_env python=$TRAVIS_PYTHON_VERSION
+    - source activate pysph_env
     - conda config --add channels conda-forge
     - conda config --add channels defaults
     - conda install -c conda-forge pocl pyopencl
-    - conda install -c defaults virtualenv
     - python -c 'import pyopencl as cl'
     - pip install beaker tox tox-travis
-    - pip install -r requirements.txt
-    - pip install -r requirements-test.txt
-    - make install
 
 script:
-    - pytest -v
+    - tox
