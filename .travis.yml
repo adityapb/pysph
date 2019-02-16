@@ -21,13 +21,16 @@ before_install:
     - conda info -a
 
 install:
-    - conda install --yes python=$TRAVIS_PYTHON_VERSION
+    - conda create -n --yes pysph_env python=$TRAVIS_PYTHON_VERSION
+    - source activate pysph_env
     - conda config --add channels conda-forge
     - conda config --add channels defaults
     - conda install -c conda-forge pocl pyopencl
     - conda install -c anaconda virtualenv
     - python -c 'import pyopencl as cl'
-    - pip install beaker tox tox-travis
+    - pip install -r requirements.txt requirements-test.txt
+    - make install
+    - mkdir testdir && cd testdir
 
 script:
-    - tox
+    - pytest -v ../
