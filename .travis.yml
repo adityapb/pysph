@@ -21,6 +21,7 @@ install:
     - cd build
     - cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_ICD=ON ../pocl-1.2
     - make -j`nproc`
+    - sudo make install
     - sudo mkdir -p /etc/OpenCL/vendors/
     - sudo cp /usr/local/etc/OpenCL/vendors/pocl.icd /etc/OpenCL/vendors/
     - sudo make install
