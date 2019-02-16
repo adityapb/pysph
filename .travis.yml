@@ -25,6 +25,7 @@ install:
     - clinfo
     - sudo mkdir -p /etc/OpenCL/vendors/
     - sudo cp /usr/local/etc/OpenCL/vendors/pocl.icd /etc/OpenCL/vendors/
+    - clinfo
     - pip install pyopencl
     - python -c 'import pyopencl as cl'
     - pip install beaker tox tox-travis
