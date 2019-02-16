@@ -22,7 +22,6 @@ install:
     - make -j`nproc`
     - sudo make install
     - export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
-    - clinfo
     - sudo mkdir -p /etc/OpenCL/vendors/
     - sudo cp /usr/local/etc/OpenCL/vendors/pocl.icd /etc/OpenCL/vendors/
     - clinfo
