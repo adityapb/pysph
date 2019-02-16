@@ -8,7 +8,6 @@ python:
 
 before_install:
     - sudo apt-get update 
-    - sudo apt install clang-5.0 libclang-5.0-dev
     - sudo apt install cmake pkg-config
     - sudo apt install libhwloc-dev
     - sudo apt install opencl-headers
