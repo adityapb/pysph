@@ -34,4 +34,4 @@ install:
     - mkdir testdir && cd testdir
 
 script:
-    - python -m pytest -v --pyargs pysph ../
+    - python -m pytest -v --pyargs pysph
