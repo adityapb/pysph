@@ -10,7 +10,7 @@ before_install:
     - sudo apt-get update 
 
 install:
-    - sudo apt-get -y install pocl
+    - sudo apt-get -y install pocl-opencl-icd
     - pip install pyopencl
     - python -c 'import pyopencl as cl'
     - pip install beaker tox tox-travis
