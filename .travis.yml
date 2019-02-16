@@ -21,7 +21,7 @@ before_install:
     - conda info -a
 
 install:
-    - conda create -n --yes pysph_env python=$TRAVIS_PYTHON_VERSION
+    - conda create -y -n pysph_env python=$TRAVIS_PYTHON_VERSION
     - source activate pysph_env
     - conda config --add channels conda-forge
     - conda config --add channels defaults
