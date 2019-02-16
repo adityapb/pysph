@@ -13,7 +13,6 @@ before_install:
     - sudo apt install opencl-headers
     - sudo apt install ocl-icd-opencl-dev
 
-
 install:
     - wget https://github.com/pocl/pocl/archive/v1.2.tar.gz
     - tar xf v1.2.tar.gz
@@ -24,7 +23,6 @@ install:
     - sudo make install
     - sudo mkdir -p /etc/OpenCL/vendors/
     - sudo cp /usr/local/etc/OpenCL/vendors/pocl.icd /etc/OpenCL/vendors/
-    - sudo make install
     - pip install pyopencl
     - python -c 'import pyopencl as cl'
     - pip install beaker tox tox-travis
