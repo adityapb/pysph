@@ -8,9 +8,21 @@ python:
 
 before_install:
     - sudo apt-get update 
+    - sudo apt install clang-5.0 libclang-5.0-dev
+    - sudo apt install cmake pkg-config
+    - sudo apt install libhwloc-dev
+    - sudo apt install opencl-headers
+    - sudo apt install ocl-icd-opencl-dev
+
 
 install:
-    - sudo apt-get -y install pocl-opencl-icd
+    - wget https://github.com/pocl/pocl/archive/v1.2.tar.gz
+    - tar xf v1.2.tar.gz
+    - mkdir build
+    - cd build
+    - cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_ICD=ON ../pocl-1.2
+    - make -j`nproc`
+    - sudo make install
     - pip install pyopencl
     - python -c 'import pyopencl as cl'
     - pip install beaker tox tox-travis
