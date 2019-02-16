@@ -34,4 +34,4 @@ install:
     - mkdir testdir && cd testdir
 
 script:
-    - pytest -v --pyargs pysph -k Periodic
+    - pytest -v --pyargs pysph
