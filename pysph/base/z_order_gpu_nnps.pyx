@@ -65,6 +65,7 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
         self.pid_keys = []
         self.cids = []
         self.cid_to_idx = []
+        self.lengths = []
 
         for i from 0<=i<self.narrays:
             pa_wrapper = <NNPSParticleArrayWrapper>self.pa_wrappers[i]
@@ -78,9 +79,9 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
                              backend=self.backend))
             self.cid_to_idx.append(Array(np.int32,
                                    backend=self.backend))
+            self.lengths.append(Array(np.uint32,
+                                backend=self.backend))
 
-        self.curr_cid = array.ones(1, dtype=np.uint32,
-                                   backend=self.backend)
         self.max_cid_src = array.zeros(1, dtype=np.int32,
                                        backend=self.backend)
 
@@ -137,14 +138,41 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
         self.pids[pa_index].set_data(sorted_indices)
         self.pid_keys[pa_index].set_data(sorted_keys)
 
-        self.curr_cid.fill(1)
+        find_num_unique_cids = self.helper.get_reduce_kernel(
+                "find_num_unique_cids", np.int32
+                )
 
-        fill_unique_cids = self.helper.get_kernel("fill_unique_cids")
+        cdef unsigned int num_cids = 1 + \
+                <unsigned int> find_num_unique_cids(
+                        self.pid_keys[pa_index].dev
+                        ).get()
+
+        self.lengths[pa_index].resize(num_cids)
+        start_cid = array.empty(num_cids, np.uint32, backend=self.backend)
+
+        fill_unique_cids = self.helper.get_scan_kernel("fill_unique_cids",
+                                                       np.uint32)
 
         fill_unique_cids(self.pid_keys[pa_index].dev,
-                self.cids[pa_index].dev, self.curr_cid.dev)
+                         self.cids[pa_index].dev,
+                         start_cid.dev)
 
-        cdef unsigned int num_cids = <unsigned int> (self.curr_cid.get())
+        cdef unsigned int num_particles = pa_gpu.get_number_of_particles()
+
+        fill_length_cids = self.helper.get_kernel("fill_length_cids")
+
+        fill_length_cids(start_cid.dev, self.lengths[pa_index].dev,
+                         num_cids, num_particles)
+
+        print self.lengths[pa_index].dev
+
+        cdef int max_np_wg = array.maximum(self.lengths[pa_index])
+        # 32 is used be default because different wgs every iteration
+        # will require template rendering every iteration 
+        self.wgs[pa_index] = max(2 ** (<int> ceil(log2(max_np_wg))), 32)
+        # Use wgs dest index
+
+        curr_cids = self.cids[pa_index]
         self.cid_to_idx[pa_index].resize(27 * num_cids)
         self.cid_to_idx[pa_index].fill(-1)
 
@@ -160,15 +188,11 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
             self.cids[pa_index].dev, self.cid_to_idx[pa_index].dev
         )
 
-        fill_cids = self.helper.get_kernel("fill_cids")
-
-        fill_cids(self.pid_keys[pa_index].dev, self.cids[pa_index].dev,
-                pa_wrapper.get_number_of_particles())
-
     cpdef _refresh(self):
         cdef NNPSParticleArrayWrapper pa_wrapper
         cdef int i, num_particles
         self.max_cid = []
+        self.wgs = []
         self.sorted = False
 
         for i from 0<=i<self.narrays:
@@ -179,6 +203,7 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
             self.pid_keys[i].resize(num_particles)
             self.cids[i].resize(num_particles)
             self.max_cid.append(0)
+            self.wgs.append(0)
 
     cpdef set_context(self, int src_index, int dst_index):
         """Setup the context before asking for neighbors.  The `dst_index`
@@ -236,40 +261,89 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
     cdef void find_neighbor_lengths(self, nbr_lengths):
         z_order_nbr_lengths = self.helper.get_kernel(
                 "z_order_nbr_lengths", sorted=self.sorted,
-                dst_src=self.dst_src)
+                dst_src=self.dst_src, wgs=self.wgs[self.dst_index])
+
+        ls = self.wgs[self.dst_index]
+        gs = ls * self.max_cid[self.dst_index]
 
         dst_gpu = self.dst.pa.gpu
         src_gpu = self.src.pa.gpu
+
+        np_src = np.asarray(self.src.get_number_of_particles(),
+                            dtype=np.uint32)
+        max_cid_src = np.asarray(self.max_cid[self.src_index],
+                                 dtype=np.uint32)
+        max_cid_dst = np.asarray(self.max_cid[self.dst_index],
+                                 dtype=np.uint32)
+        radius_scale2 = np.asarray(self.radius_scale2,
+                                   dtype=self.dtype)
+        cell_size = np.asarray(self.cell_size,
+                               dtype=self.dtype)
+
+        #print self.cid_to_idx[self.dst_index]
+        #print self.pids[self.dst_index]
+        #print self.cids[self.dst_index]
+
+        working_qids = Array(np.uint32, n=self.dst.get_number_of_particles(),
+                             backend=self.backend)
+
         z_order_nbr_lengths(dst_gpu.x.dev, dst_gpu.y.dev, dst_gpu.z.dev,
                 dst_gpu.h.dev, src_gpu.x.dev, src_gpu.y.dev, src_gpu.z.dev,
                 src_gpu.h.dev,
                 self.make_vec(self.xmin[0], self.xmin[1],
-                    self.xmin[2]), self.src.get_number_of_particles(),
+                    self.xmin[2]), np_src,
                 self.pid_keys[self.src_index].dev,
                 self.pids[self.dst_index].dev,
                 self.pids[self.src_index].dev,
-                self.max_cid[self.src_index], self.cids[self.dst_index].dev,
+                max_cid_src, max_cid_dst,
+                self.cid_to_idx[self.dst_index].dev,
+                self.cids[self.dst_index].dev,
                 self.cid_to_idx[self.src_index].dev,
                 self.overflow_cid_to_idx.dev, self.dst_to_src.dev,
-                nbr_lengths.dev, self.radius_scale2, self.cell_size)
+                self.lengths[self.dst_index].dev,
+                self.lengths[self.src_index].dev,
+                nbr_lengths.dev, radius_scale2, cell_size, working_qids.dev,
+                ls=(ls,), gs=(gs,), queue=self.queue)
+
+        print "qids = \n", working_qids
+        #print "Neighbor lengths", nbr_lengths.dev
 
     cdef void find_nearest_neighbors_gpu(self, nbrs, start_indices):
         z_order_nbrs = self.helper.get_kernel(
                 "z_order_nbrs", sorted=self.sorted,
-                dst_src=self.dst_src)
+                dst_src=self.dst_src, wgs=self.wgs[self.dst_index])
+
+        ls = self.wgs[self.dst_index]
+        gs = ls * self.max_cid[self.dst_index]
 
         dst_gpu = self.dst.pa.gpu
         src_gpu = self.src.pa.gpu
+
+        np_src = np.asarray(self.src.get_number_of_particles(),
+                            dtype=np.uint32)
+        max_cid_src = np.asarray(self.max_cid[self.src_index],
+                                 dtype=np.uint32)
+        max_cid_dst = np.asarray(self.max_cid[self.dst_index],
+                                 dtype=np.uint32)
+        radius_scale2 = np.asarray(self.radius_scale2,
+                                   dtype=self.dtype)
+        cell_size = np.asarray(self.cell_size,
+                               dtype=self.dtype)
+
         z_order_nbrs(dst_gpu.x.dev, dst_gpu.y.dev, dst_gpu.z.dev,
                 dst_gpu.h.dev, src_gpu.x.dev, src_gpu.y.dev, src_gpu.z.dev,
                 src_gpu.h.dev,
                 self.make_vec(self.xmin[0], self.xmin[1],
                     self.xmin[2]),
-                self.src.get_number_of_particles(),
-                self.pid_keys[self.src_index].dev,
+                np_src, self.pid_keys[self.src_index].dev,
                 self.pids[self.dst_index].dev,
                 self.pids[self.src_index].dev,
-                self.max_cid[self.src_index], self.cids[self.dst_index].dev,
+                max_cid_src, max_cid_dst,
+                self.cid_to_idx[self.dst_index].dev,
+                self.cids[self.dst_index].dev,
                 self.cid_to_idx[self.src_index].dev,
                 self.overflow_cid_to_idx.dev, self.dst_to_src.dev,
-                start_indices.dev, nbrs.dev, self.radius_scale2, self.cell_size)
+                self.lengths[self.dst_index].dev,
+                self.lengths[self.src_index].dev,
+                start_indices.dev, nbrs.dev, radius_scale2, cell_size,
+                ls=(ls,), gs=(gs,), queue=self.queue)

@@ -18,6 +18,8 @@ cdef class ZOrderGPUNNPS(GPUNNPS):
     cdef public list cids
     cdef public list cid_to_idx
     cdef public list max_cid
+    cdef public list wgs
+    cdef public list lengths
     cdef public object dst_to_src
     cdef object overflow_cid_to_idx
     cdef object curr_cid

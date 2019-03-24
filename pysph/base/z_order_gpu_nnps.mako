@@ -26,15 +26,41 @@
     pids[i] = i;
 </%def>
 
+#################################################################################
+
+<%def name="find_num_unique_cids_args(data_t)" cached="True">
+    unsigned long* keys
+</%def>
+
+<%def name="map_find_num_unique_cids_src(data_t)" cached="True">
+    i != 0 && keys[i] != keys[i - 1] ? 1 : 0
+</%def>
 
 <%def name="fill_unique_cids_args(data_t)" cached="True">
-    unsigned long* keys, unsigned int* cids, unsigned int* curr_cid
+    unsigned long* keys, unsigned int* cids, unsigned int* start_cid
 </%def>
 
-<%def name="fill_unique_cids_src(data_t)" cached="True">
-    cids[i] = (i != 0 && keys[i] != keys[i-1]) ? atomic_inc(&curr_cid[0]) : 0;
+<%def name="inp_fill_unique_cids_src(data_t)" cached="True">
+    i != 0 && keys[i] != keys[i - 1] ? 1 : 0
 </%def>
 
+<%def name="out_fill_unique_cids_src(data_t)" cached="True">
+    cids[i] = item;
+    if(item != prev_item)
+        start_cid[item] = i;
+</%def>
+
+
+<%def name="fill_length_cids_args(data_t)" cached="True">
+    unsigned int* start_cids, unsigned int* lengths,
+    unsigned int num_cids, unsigned int num_particles
+</%def>
+
+<%def name="fill_length_cids_src(data_t)" cached="True">
+    lengths[i] = (i < num_cids - 1 ? start_cids[i + 1] : num_particles) - start_cids[i] 
+</%def>
+
+#################################################################################
 
 <%def name="map_cid_to_idx_args(data_t)" cached="True">
     ${data_t}* x, ${data_t}* y, ${data_t}* z, int num_particles,
@@ -45,7 +71,7 @@
 <%def name="map_cid_to_idx_src(data_t)" cached="True">
     unsigned int cid = cids[i];
 
-    if(i != 0 && cid == 0)
+    if(i != 0 && cids[i - 1] == cid)
         PYOPENCL_ELWISE_CONTINUE;
 
     unsigned int j;
@@ -73,23 +99,6 @@
         key = nbr_boxes[j];
         idx = find_idx(keys, num_particles, key);
         cid_to_idx[27*cid + j] = idx;
-    }
-</%def>
-
-
-<%def name="fill_cids_args(data_t)" cached="True">
-    unsigned long* keys, unsigned int* cids, unsigned int num_particles
-</%def>
-
-<%def name="fill_cids_src(data_t)" cached="True">
-    unsigned int cid = cids[i];
-    if(cid == 0)
-        PYOPENCL_ELWISE_CONTINUE;
-    unsigned int j = i + 1;
-    while(j < num_particles && cids[j] == 0)
-    {
-        cids[j] = cid;
-        j++;
     }
 </%def>
 
@@ -152,36 +161,49 @@
     }
 </%def>
 
-<%def name="z_order_nbrs_prep(data_t, sorted, dst_src)", cached="False">
-    unsigned int qid;
+<%def name="z_order_nbrs_prep(data_t, sorted, dst_src, wgs)", cached="False">
+    unsigned int cid = (unsigned int) get_group_id(0);
 
-    qid = pids_dst[i];
+    if(cid >= max_cid_dst)
+        return;
 
-    ${data_t}4 q = (${data_t}4)(d_x[qid], d_y[qid], d_z[qid], d_h[qid]);
+    long np_wg = (long) lengths_dst[cid];
+
+    long start_wg = (long) cid_to_idx_dst[27 * cid];
+
+    unsigned int qid = 0;
+    ${data_t}4 q;
+    ${data_t} h_i;
+    ${data_t} h_j;
+
+    // Only the threads with lid < np_wg are responsible for
+    // finding neighbors. Other threads are only used for
+    // copying data to local memory
+    if(lid < np_wg)
+    {
+        qid = pids_dst[start_wg + lid];
+        q = (${data_t}4)(d_x[qid], d_y[qid], d_z[qid], d_h[qid]);
+        h_i = radius_scale2*q.w*q.w;
+    }
 
     int3 c;
 
-    FIND_CELL_ID(
-        q.x - min.x,
-        q.y - min.y,
-        q.z - min.z,
-        cell_size, c.x, c.y, c.z
-        );
+    __local ${data_t} xlocal[${wgs}];
+    __local ${data_t} ylocal[${wgs}];
+    __local ${data_t} zlocal[${wgs}];
+    __local ${data_t} hlocal[${wgs}];
 
     int idx;
     unsigned int j;
     ${data_t} dist;
-    ${data_t} h_i = radius_scale2*q.w*q.w;
-    ${data_t} h_j;
 
     unsigned long key;
     unsigned int pid;
+    unsigned int curr_length;
+    unsigned int curr_cid, k;
 
-
-    unsigned int cid = cids[i];
     __global int* nbr_boxes = cid_to_idx;
     unsigned int start_id_nbr_boxes;
-
 
     % if dst_src:
         cid = dst_to_src[cid];
@@ -203,39 +225,80 @@
     ${data_t}* s_z, ${data_t}* s_h,
     ${data_t}3 min, unsigned int num_particles, unsigned long* keys,
     unsigned int* pids_dst, unsigned int* pids_src, unsigned int max_cid_src,
+    unsigned int max_cid_dst, int* cid_to_idx_dst,
     unsigned int* cids, int* cid_to_idx, int* overflow_cid_to_idx,
-    unsigned int* dst_to_src, unsigned int* nbr_lengths, ${data_t} radius_scale2,
-    ${data_t} cell_size
+    unsigned int* dst_to_src, unsigned int* lengths_dst,
+    unsigned int* lengths_src,
+    unsigned int* nbr_lengths, ${data_t} radius_scale2,
+    ${data_t} cell_size, unsigned int* working_qids
 </%def>
 
-<%def name="z_order_nbr_lengths_src(data_t, sorted, dst_src)" cached="False">
-    ${z_order_nbrs_prep(data_t, sorted, dst_src)}
+<%def name="z_order_nbr_lengths_src(data_t, sorted, dst_src, wgs)" cached="False">
+    ${z_order_nbrs_prep(data_t, sorted, dst_src, wgs)}
 
-    unsigned int length = 0;
+    if(i < num_particles)
+        working_qids[i] = (unsigned int) i;
+
+    unsigned int nbr_length = 0;
 
     ${data_t}4 s;
 
-    #pragma unroll
+    int bid, nblocks;
+    unsigned int m, pid_idx;
+
     for(j=0; j<27; j++)
     {
         idx = nbr_boxes[start_id_nbr_boxes + j];
         if(idx == -1)
             continue;
         key = keys[idx];
+        curr_cid = cids[idx];
 
-        while(idx < num_particles && keys[idx] == key)
+        curr_length = lengths_src[curr_cid];
+        nblocks = ceil(((float) curr_length) / ${wgs});
+
+        // In the current implementation, nblocks will always
+        // be equal to 1 as wgs is the max number of particles
+        // per cell. This may not always work as there can be
+        // a large number of particles per cell. In the future,
+        // work items in such cells can be made to handle multiple
+        // particles. In that case nblocks may not always be 1
+        for(bid=0; bid<nblocks; bid++)
         {
-            pid = pids_src[idx];
-            s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
-            h_j = radius_scale2 * s.w * s.w;
-            dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
-            if(dist < h_i || dist < h_j)
-                length++;
-            idx++;
+            pid_idx = (unsigned int) (bid * ${wgs} + lid);
+            if(pid_idx >= curr_length)
+                break;
+            pid = pids_src[idx + pid_idx];
+            xlocal[lid] = s_x[pid];
+            ylocal[lid] = s_y[pid];
+            zlocal[lid] = s_z[pid];
+            hlocal[lid] = s_h[pid];
+
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            m = curr_length < ${wgs} ? curr_length : ${wgs};
+                
+            if(lid < np_wg)
+            {
+                for(k=0; k<m; k++)
+                {
+                    pid = pids_src[idx + k];
+                    s = (${data_t}4)(xlocal[k], ylocal[k],
+                                     zlocal[k], hlocal[k]);
+                    h_j = radius_scale2 * s.w * s.w;
+                    dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
+                    if(dist < h_i || dist < h_j)
+                        nbr_length++;
+                }
+            }
+
+            barrier(CLK_LOCAL_MEM_FENCE);
         }
+
     }
 
-    nbr_lengths[qid] = length;
+    if(lid < np_wg)
+        nbr_lengths[qid] = 0;
 
 </%def>
 
@@ -246,40 +309,76 @@
     ${data_t}* s_z, ${data_t}* s_h,
     ${data_t}3 min, unsigned int num_particles, unsigned long* keys,
     unsigned int* pids_dst, unsigned int* pids_src, unsigned int max_cid_src,
+    unsigned int max_cid_dst, int* cid_to_idx_dst,
     unsigned int* cids, int* cid_to_idx, int* overflow_cid_to_idx,
-    unsigned int* dst_to_src, unsigned int* start_indices, unsigned int* nbrs,
+    unsigned int* dst_to_src, unsigned int* lengths_dst,
+    unsigned int* lengths_src,
+    unsigned int* start_indices, unsigned int* nbrs,
     ${data_t} radius_scale2, ${data_t} cell_size
 </%def>
 
 <%def name="z_order_nbrs_src(data_t, sorted, dst_src)" cached="False">
-    ${z_order_nbrs_prep(data_t, sorted, dst_src)}
+    ${z_order_nbrs_prep(data_t, sorted, dst_src, wgs)}
 
     unsigned long start_idx = (unsigned long) start_indices[qid];
     unsigned long curr_idx = 0;
 
     ${data_t}4 s;
 
-    #pragma unroll
+    int m, pid_idx, bid, nblocks;
+
     for(j=0; j<27; j++)
     {
         idx = nbr_boxes[start_id_nbr_boxes + j];
         if(idx == -1)
             continue;
         key = keys[idx];
+        curr_cid = cids[idx];
 
-        while(idx < num_particles && keys[idx] == key)
+        curr_length = lengths_src[curr_cid];
+        nblocks = ceil(((float) curr_length) / ${wgs});
+
+        // In the current implementation, nblocks will always
+        // be equal to 1 as wgs is the max number of particles
+        // per cell. This may not always work as there can be
+        // a large number of particles per cell. In the future,
+        // work items in such cells can be made to handle multiple
+        // particles. In that case nblocks may not always be 1
+        for(bid=0; bid<nblocks; bid++)
         {
-            pid = pids_src[idx];
-            s = (${data_t}4)(s_x[pid], s_y[pid], s_z[pid], s_h[pid]);
-            h_j = radius_scale2 * s.w * s.w;
-            dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
-            if(dist < h_i || dist < h_j)
+            pid_idx = bid * ${wgs} + lid;
+            if(pid_idx >= curr_length)
+                break;
+            pid = pids_src[idx + pid_idx];
+            xlocal[lid] = s_x[pid];
+            ylocal[lid] = s_y[pid];
+            zlocal[lid] = s_z[pid];
+            hlocal[lid] = s_h[pid];
+
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            m = curr_length < ${wgs} ? curr_length : ${wgs};
+                
+            if(lid < np_wg)
             {
-                nbrs[start_idx + curr_idx] = pid;
-                curr_idx++;
+                for(k=0; k<m; k++)
+                {
+                    pid = pids_src[idx + k];
+                    s = (${data_t}4)(xlocal[k], ylocal[k],
+                                     zlocal[k], hlocal[k]);
+                    h_j = radius_scale2 * s.w * s.w;
+                    dist = NORM2(q.x - s.x, q.y - s.y, q.z - s.z);
+                    if(dist < h_i || dist < h_j)
+                    {
+                        nbrs[start_idx + curr_idx] = pid;
+                        curr_idx++;
+                    }
+                }
             }
-            idx++;
+
+            barrier(CLK_LOCAL_MEM_FENCE);
         }
+
     }
 
 </%def>
