@@ -22,6 +22,7 @@ from pysph.base.kernels import CubicSpline
 from pysph.base.utils import get_particle_array_wcsph
 from pysph.solver.application import Application
 from pysph.sph.scheme import WCSPHScheme
+from pysph.base.nnps import LinkedListNNPS
 
 rho0 = 1000.0
 
@@ -75,8 +76,8 @@ class Cube(Application):
         fluid.h[:] = h0
 
         fluid.rho[:] = rho0
-        #nnps = LinkedListNNPS(dim=3, particles=[fluid])
-        #nnps.spatially_order_particles(0)
+        nnps = LinkedListNNPS(dim=3, particles=[fluid])
+        nnps.spatially_order_particles(0)
 
         print("Number of particles:", x.size)
         fluid.set_lb_props( list(fluid.properties.keys()) )
